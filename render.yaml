@@ -1,0 +1,61 @@
+services:
+  - type: web
+    name: otoshi-launcher-backend
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: otoshi-db
+          property: connectionString
+      - key: SECRET_KEY
+        sync: false
+      - key: ADMIN_API_KEY
+        sync: false
+      - key: ADMIN_EMAILS
+        sync: false
+      - key: ADMIN_OAUTH_IDS
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false
+      - key: FRONTEND_BASE_URL
+        sync: false
+      - key: OAUTH_CALLBACK_BASE_URL
+        sync: false
+      - key: GOOGLE_OAUTH_CLIENT_ID
+        sync: false
+      - key: GOOGLE_OAUTH_CLIENT_SECRET
+        sync: false
+      - key: EPIC_OAUTH_CLIENT_ID
+        sync: false
+      - key: EPIC_OAUTH_CLIENT_SECRET
+        sync: false
+      - key: DISCORD_OAUTH_CLIENT_ID
+        sync: false
+      - key: DISCORD_OAUTH_CLIENT_SECRET
+        sync: false
+      - key: STEAM_WEB_API_KEY
+        sync: false
+      - key: STEAMGRIDDB_API_KEY
+        sync: false
+      - key: HUGGINGFACE_TOKEN
+        sync: false
+      - key: HF_REPO_ID
+        sync: false
+      - key: LUA_REMOTE_ONLY
+        value: "true"
+      - key: MANIFEST_REMOTE_ONLY
+        value: "true"
+      - key: ADMIN_ONLY_DEVELOPER_PORTAL
+        value: "true"
+      - key: HF_REPO_TYPE
+        value: "dataset"
+      - key: HF_REVISION
+        value: "main"
+
+databases:
+  - name: otoshi-db
+    databaseName: otoshi
+    plan: free
