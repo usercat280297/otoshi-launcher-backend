@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 HF_REPO = os.getenv("HF_LUA_REPO") or os.getenv("HF_REPO_ID", "otoshi/lua-files")
 HF_REVISION = os.getenv("HF_REVISION", "main")
 HUGGINGFACE_TOKEN = os.getenv("HUGGINGFACE_TOKEN", "")
+HF_LUA_ZIP_PATH = os.getenv("HF_LUA_ZIP_PATH", "lua_files/lua_files.zip")
 LUA_CACHE_DIR = Path(os.getenv("APPDATA", ".")) / "otoshi_launcher" / "lua_cache"
 
 HF_CDN_URL = "https://huggingface.co"
@@ -132,31 +133,49 @@ class LuaSyncService:
     def _sync_from_huggingface(self) -> bool:
         """Fallback: Sync lua files from Hugging Face with proper auth"""
         try:
+            if self._has_cached_hf_files():
+                logger.info("Lua cache already present (HF); skipping download")
+                return False
+
             logger.info(f"Attempting to sync from Hugging Face: {HF_REPO}")
 
-            # Try with bearer token first
-            hf_zip_url = f"https://huggingface.co/datasets/{HF_REPO}/raw/{HF_REVISION}/lua-files.zip"
-            logger.info(f"Downloading from: {hf_zip_url}")
+            # Try preferred path first (supports nested lua_files/ folder)
+            preferred_paths = []
+            if HF_LUA_ZIP_PATH:
+                preferred_paths.append(HF_LUA_ZIP_PATH)
+            preferred_paths.append("lua-files.zip")
+            preferred_paths.append("lua_files.zip")
 
+            hf_zip_url = ""
             headers = self.hf_headers or {}
-            resp = requests.get(
-                hf_zip_url,
-                headers=headers,
-                timeout=120,
-                stream=True
-            )
+            for path in preferred_paths:
+                candidate = f"https://huggingface.co/datasets/{HF_REPO}/resolve/{HF_REVISION}/{path}"
+                logger.info(f"Trying lua zip: {candidate}")
+                resp = requests.get(candidate, headers=headers, timeout=30, stream=True)
+                if resp.status_code == 200:
+                    hf_zip_url = candidate
+                    break
+                resp.close()
+
+            if not hf_zip_url:
+                # Fall back to auto-discovery in repo tree
+                discovered_path = self._find_hf_lua_zip(headers)
+                if discovered_path:
+                    hf_zip_url = f"https://huggingface.co/datasets/{HF_REPO}/resolve/{HF_REVISION}/{discovered_path}"
+                    logger.info(f"Retrying with detected lua zip: {hf_zip_url}")
+
+            if not hf_zip_url:
+                logger.warning("No lua zip found in Hugging Face repo")
+                return False
+
+            resp = requests.get(hf_zip_url, headers=headers, timeout=120, stream=True)
 
             if resp.status_code == 404:
                 alt_path = self._find_hf_lua_zip(headers)
                 if alt_path:
                     hf_zip_url = f"https://huggingface.co/datasets/{HF_REPO}/resolve/{HF_REVISION}/{alt_path}"
                     logger.info(f"Retrying with detected lua zip: {hf_zip_url}")
-                    resp = requests.get(
-                        hf_zip_url,
-                        headers=headers,
-                        timeout=120,
-                        stream=True
-                    )
+                    resp = requests.get(hf_zip_url, headers=headers, timeout=120, stream=True)
 
             if resp.status_code in (401, 403) and headers.get("Authorization"):
                 logger.warning("Hugging Face auth failed - retrying without token")
@@ -189,7 +208,7 @@ class LuaSyncService:
                 return False
 
             # Mark as HF version
-            (self.cache_dir / "version.txt").write_text("huggingface-1.0.0")
+            (self.cache_dir / "version.txt").write_text(f"huggingface:{HF_REPO}@{HF_REVISION}")
             logger.info("Lua files synced from Hugging Face")
             return True
         except requests.exceptions.Timeout:
@@ -212,17 +231,40 @@ class LuaSyncService:
         except Exception:
             return None
         candidates = []
+        lua_dirs = []
         for item in items:
-            if item.get("type") != "file":
-                continue
             path = str(item.get("path") or "")
             lower = path.lower()
-            if not lower.endswith(".zip"):
-                continue
-            if "lua" in lower:
-                candidates.append(path)
+            if item.get("type") == "file":
+                if lower.endswith(".zip") and "lua" in lower:
+                    candidates.append(path)
+            elif item.get("type") == "directory":
+                if "lua" in lower:
+                    lua_dirs.append(path)
         if not candidates:
-            return None
+            # Try to look inside lua-like folders
+            for folder in lua_dirs:
+                sub_url = f"https://huggingface.co/api/datasets/{HF_REPO}/tree/{HF_REVISION}/{folder}"
+                sub_resp = requests.get(sub_url, headers=headers, timeout=15)
+                if sub_resp.status_code in (401, 403) and headers.get("Authorization"):
+                    sub_resp = requests.get(sub_url, headers={}, timeout=15)
+                if sub_resp.status_code != 200:
+                    continue
+                try:
+                    sub_items = sub_resp.json()
+                except Exception:
+                    continue
+                for item in sub_items:
+                    if item.get("type") != "file":
+                        continue
+                    path = str(item.get("path") or "")
+                    lower = path.lower()
+                    if lower.endswith(".zip") and "lua" in lower:
+                        candidates.append(path)
+                if candidates:
+                    break
+            if not candidates:
+                return None
         preferred = ["lua-files.zip", "lua_files.zip", "lua.zip"]
         for name in preferred:
             for path in candidates:
@@ -240,6 +282,18 @@ class LuaSyncService:
             except Exception:
                 return None
         return None
+
+    def _has_cached_hf_files(self) -> bool:
+        """Check if HF lua files are already cached."""
+        version = self._get_local_version() or ""
+        lua_dir = self.cache_dir / "lua_files"
+        if not lua_dir.exists():
+            return False
+        if not list(lua_dir.glob("*.lua")):
+            return False
+        if version.startswith(f"huggingface:{HF_REPO}@{HF_REVISION}"):
+            return True
+        return False
 
     def _get_bundled_lua_dir(self) -> Optional[Path]:
         """Find bundled lua files (PyInstaller, portable, or dev)"""
