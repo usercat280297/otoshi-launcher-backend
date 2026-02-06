@@ -59,7 +59,7 @@ from .routes import (
 )
 from .websocket import manager
 from fastapi import WebSocket, WebSocketDisconnect, status, Request, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from jose import jwt, JWTError
 from .core.config import SECRET_KEY, ALGORITHM
 from .middleware import AuthMiddleware, RateLimitMiddleware
@@ -159,6 +159,11 @@ def on_shutdown() -> None:
 @app.get("/health")
 def health_check():
     return {"status": "ok", "news_enhanced": True}
+
+
+@app.head("/health")
+def health_check_head():
+    return Response(status_code=200)
 
 
 app.include_router(auth.router, prefix="/auth", tags=["auth"])
