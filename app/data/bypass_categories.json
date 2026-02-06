@@ -1,0 +1,288 @@
+{
+  "categories": [
+    {
+      "id": "ea",
+      "name": "EA APP",
+      "description": "Electronic Arts games requiring EA App/Origin",
+      "icon": "ea",
+      "games": ["1262560", "1846380", "1693980", "1222680", "1313860", "1506830", "2963840", "3629260", "1904540"]
+    },
+    {
+      "id": "ubisoft",
+      "name": "UBISOFT",
+      "description": "Ubisoft games requiring Ubisoft Connect",
+      "icon": "ubisoft",
+      "games": ["812140", "582160", "208480", "911400", "3035570", "2208920", "289650", "368500", "220240", "298110", "552520", "939960", "371660", "243470", "447040", "2239550", "916440", "950050"]
+    },
+    {
+      "id": "rockstar",
+      "name": "ROCKSTAR",
+      "description": "Rockstar Games requiring Rockstar Launcher",
+      "icon": "rockstar",
+      "games": ["1174180", "3240220"]
+    },
+    {
+      "id": "denuvo",
+      "name": "DENUVO",
+      "description": "Games with Denuvo anti-tamper protection",
+      "icon": "denuvo",
+      "games": ["1172380", "2050650", "1413480", "1687950", "2215260", "2055290", "2680010", "1817230", "1551360", "1903340", "1382330", "1113000", "990080", "39140", "287700", "1244460", "1874000", "532210", "601150", "594570", "3764200"]
+    }
+  ],
+  "games": {
+    "812140": {
+      "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/Assassin's%20Creed%20Odyssey%20Crack.zip?download=true",
+      "name": "Assassin's Creed Odyssey",
+      "category": "ubisoft"
+    },
+    "916440": {
+      "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/C.r.ack%20files/Anno.1800.End.of.an.Era.Crack.Only-voices38.rar?download=true",
+      "name": "ANNO 1800",
+      "category": "ubisoft"
+    },
+    "220240": {
+      "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/C.r.ack%20files/FAR%20CRY%203.zip?download=true",
+      "name": "FAR CRY 3",
+      "category": "ubisoft"
+    },
+    "298110": {
+      "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/C.r.ack%20files/FAR%20CRY%204.zip?download=true",
+      "name": "FAR CRY 4",
+      "category": "ubisoft"
+    },
+    "552520": {
+      "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/C.r.ack%20files/FAR%20CRY%205.zip?download=true",
+      "name": "FAR CRY 5",
+      "category": "ubisoft"
+    },
+    "939960": {
+      "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/C.r.ack%20files/FAR%20CRY%20NEW%20DAWN.zip?download=true",
+      "name": "FAR CRY NEW DAWN",
+      "category": "ubisoft"
+    },
+    "371660": {
+      "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/C.r.ack%20files/FAR%20CRY%20PRIMAL.zip?download=true",
+      "name": "FAR CRY PRIMAL",
+      "category": "ubisoft"
+    },
+    "1262560": {
+      "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/C.r.ack%20files/NEED%20FOR%20SPEED%20MOST%20WANTED%20c.r.ack.zip?download=true",
+      "name": "Need for Speed™ Most Wanted",
+      "category": "ea"
+    },
+    "1846380": {
+      "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/C.r.ack%20files/NEED%20FOR%20SPEED%20UNBOUND%20c.r.ack.rar?download=true",
+      "name": "Need for Speed™ Unbound",
+      "category": "ea"
+    },
+    "1693980": {
+      "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/C.r.ack%20files/Dead.Space.Remake.PROPER.Crack.Only-voices38.rar?download=true",
+      "name": "DEAD SPACE REMAKE",
+      "category": "ea"
+    },
+    "582160": {
+      "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/Assassin's%20Creed%20-%20Origins%20FIX.zip?download=true",
+      "name": "Assassin's Creed Origins",
+      "category": "ubisoft"
+    },
+    "1172380": {
+      "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/Star%20Wars%20Jedi%20Fallen%20Order%20CW.FIX.rar?download=true",
+      "name": "STAR WARS Jedi: Fallen Order™",
+      "category": "denuvo"
+    },
+    "2050650": {
+      "links": [
+        {
+          "link": "https://github.com/usercat280297/MangaVNteam.github.io/releases/download/re4remake/Resident.evil.4.remake.Denuvo.Bypass.Files.zip",
+          "name": "Bypass Files"
+        },
+        {
+          "link": "https://github.com/usercat280297/MangaVNteam.github.io/releases/download/re4fix/Resident.Evil.4.Remake.Error.Fix.7z",
+          "name": "Error Fix"
+        }
+      ],
+      "name": "Resident Evil 4",
+      "category": "denuvo"
+    },
+    "1413480": {
+      "link": "https://github.com/usercat280297/Xuanngoc/releases/download/Shin.Megami.Tensei.III.Nocturne.HD.Remaster.crack.zip/Shin.Megami.Tensei.III.Nocturne.HD.Remaster.crack.zip",
+      "name": "Shin Megami Tensei III Nocturne HD Remaster",
+      "category": "denuvo"
+    },
+    "1687950": {
+      "link": "https://github.com/usercat280297/Xuanngoc/releases/download/lol/Persona.5.Royal.CRACKONLY-MKDEV.zip",
+      "name": "Persona 5 Royal",
+      "category": "denuvo"
+    },
+    "2215260": {
+      "link": "https://github.com/usercat280297/Xuanngoc/releases/download/StarlinkBattleforAtlas/Scott.Pilgrim.vs.The.World.Crack.denuvo.zip",
+      "name": "Scott Pilgrim vs The World",
+      "category": "denuvo"
+    },
+    "2055290": {
+      "link": "https://github.com/usercat280297/crackvingheolauncher/releases/download/soniccolorsultimate/SoniccolorsUltimateCrack.zip",
+      "name": "Sonic Colors: Ultimate",
+      "category": "denuvo"
+    },
+    "2680010": {
+      "link": "https://github.com/usercat280297/Xuanngoc/releases/download/TheFirstBerserkerKhazan/The.First.Berserker.Khazan.zip",
+      "name": "The First Berserker: Khazan",
+      "category": "denuvo"
+    },
+    "1817230": {
+      "link": "https://github.com/usercat280297/Xuanngoc/releases/download/hifirush/Hi-Fi.RUSH.Crack.denuvo.rar",
+      "name": "Hi-Fi RUSH",
+      "category": "denuvo"
+    },
+    "950050": {
+      "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/Starlink%20Battle%20for%20Atlas%20crack%20denuvo.zip?download=true",
+      "name": "Starlink Battle for Atlas",
+      "category": "ubisoft"
+    },
+    "1313860": {
+      "link": "https://github.com/usercat280297/crackvingheolauncher/releases/download/fifa21crack/FIFA.21.Crack.zip",
+      "name": "EA SPORTS™ FIFA 21",
+      "category": "ea"
+    },
+    "1222680": {
+      "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/Need%20for%20Speed%20Heat%20crack.rar?download=true",
+      "name": "Need for speed heat",
+      "category": "ea"
+    },
+    "208480": {
+      "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/Assassin's%20Creed%20III%20fix.zip?download=true",
+      "name": "Assassin's Creed III",
+      "category": "ubisoft"
+    },
+    "3035570": {
+      "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/Assassin's%20Creed%20Mirage%20FIX.zip?download=true",
+      "name": "Assassin's Creed Mirage",
+      "category": "ubisoft"
+    },
+    "2208920": {
+      "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/Assassin's%20Creed%20Valhalla%20fix.zip?download=true",
+      "name": "Assassin's Creed Valhalla",
+      "category": "ubisoft"
+    },
+    "289650": {
+      "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/Unity%20fix.zip?download=true",
+      "name": "Assassin's Creed Unity",
+      "category": "ubisoft"
+    },
+    "368500": {
+      "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/Assassins%20Creed%20Syndicate%20crack.rar?download=true",
+      "name": "Assassin's Creed Syndicate",
+      "category": "ubisoft"
+    },
+    "911400": {
+      "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/Assassin's%20Creed%C2%AE%20III%20Remastered%20crack.rar?download=true",
+      "name": "Assassin's Creed III Remastered",
+      "category": "ubisoft"
+    },
+    "2963840": {
+      "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/FC%2025%20SHOWCASE.rar?download=true",
+      "name": "FC 25 SHOWCASE",
+      "category": "ea"
+    },
+    "3629260": {
+      "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/C.r.ack%20files/FC26%20NotACrack%20Showcase%20v1.0.130.16994.rar?download=true",
+      "name": "EA SPORTS FC™ 26 SHOWCASE",
+      "category": "ea"
+    },
+    "1174180": {
+      "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/C.r.ack%20files/RED%20DEAD%20REDEEMPTION%202%20crack_fix.zip?download=true",
+      "name": "RED DEAD REDEEMPTION 2",
+      "category": "rockstar"
+    },
+    "243470": {
+      "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/C.r.ack%20files/WATCH_DOGS.zip?download=true",
+      "name": "WATCH_DOGS",
+      "category": "ubisoft"
+    },
+    "601150": {
+      "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/C.r.ack%20files/dmc5crk.rar?download=true",
+      "name": "Devil May Cry 5",
+      "category": "denuvo"
+    },
+    "594570": {
+      "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/C.r.ack%20files/Total%20War%20WARHAMMER%20II%20crack.so.zip?download=true",
+      "name": "Total War: WARHAMMER II",
+      "category": "denuvo"
+    },
+    "447040": {
+      "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/C.r.ack%20files/WATCH_DOGS%202.zip?download=true",
+      "name": "WATCH_DOGS 2",
+      "category": "ubisoft"
+    },
+    "2239550": {
+      "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/C.r.ack%20files/WATCH%20DOGS%20LEGION.zip?download=true",
+      "name": "Watch Dogs: Legion",
+      "category": "ubisoft"
+    },
+    "1551360": {
+      "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/FH5_Fix_Repair_Steam_V10_Generic.rar?download=true",
+      "name": "Forza Horizon 5",
+      "category": "denuvo"
+    },
+    "1903340": {
+      "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/Clair%20Obscur%20Expedition%2033%20crack.zip?download=true",
+      "name": "Clair Obscur Expedition 33",
+      "category": "denuvo"
+    },
+    "1506830": {
+      "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/FIFA22%20C.r.ack.rar?download=true",
+      "name": "FIFA 22",
+      "category": "ea"
+    },
+    "1382330": {
+      "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/PERSONA%205%20STRIKERS%20c.r.ack.zip?download=true",
+      "name": "PERSONA 5 STRIKER",
+      "category": "denuvo"
+    },
+    "1113000": {
+      "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/PERSONA%204%20GOLDEN%20c.r.ack.zip?download=true",
+      "name": "PERSONA 4 GOLDEN",
+      "category": "denuvo"
+    },
+    "990080": {
+      "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/HOGWARTS%20LEGACY%20c.r.ack.zip?download=true",
+      "name": "HOGWARTS LEGACY",
+      "category": "denuvo"
+    },
+    "39140": {
+      "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/FINAL%20FANTASY%20VII%20c.r.ack.rar?download=true",
+      "name": "FINAL FANTASY VII",
+      "category": "denuvo"
+    },
+    "287700": {
+      "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/METAL%20GEAR%20SOLID%20V%20THE%20PHANTOM%20PAIN%20c.r.ack.zip?download=true",
+      "name": "METAL GEAR SOLID V: THE PHANTOM PAIN",
+      "category": "denuvo"
+    },
+    "1904540": {
+      "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/C.r.ack%20files/FOOTBALL%20MANAGER%2023%20c.r.ack.zip?download=true",
+      "name": "FOOTBALL MANAGER 23",
+      "category": "ea"
+    },
+    "1244460": {
+      "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/C.r.ack%20files/JURASSIC%20WORLD%20EVOLUTION%202%20C.r.ack.zip?download=true",
+      "name": "JURASSIC WORLD EVOLUTION 2",
+      "category": "denuvo"
+    },
+    "1874000": {
+      "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/C.r.ack%20files/LIFE%20IS%20STRANGE%20DOUBLE%20EXPOSURE%20c.r.ack.zip?download=true",
+      "name": "Life is Strange: Double Exposure",
+      "category": "denuvo"
+    },
+    "532210": {
+      "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/C.r.ack%20files/LIFE%20IS%20STRANGE%202%20c.r.ack.zip?download=true",
+      "name": "LIFE IS STRANGE 2",
+      "category": "denuvo"
+    },
+    "3240220": {
+      "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/GRAND%20THEFT%20AUTO%20V%20ENHANCED%20c.r.zip?download=true",
+      "name": "GRAND THEFT AUTO V ENHANCED",
+      "category": "rockstar"
+    }
+  }
+}

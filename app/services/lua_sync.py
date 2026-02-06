@@ -1,0 +1,349 @@
+"""
+Auto-sync lua files from admin server or Hugging Face
+Downloads and caches lua files in AppData on startup
+Fallback to bundled/local lua files if sync fails
+"""
+import os
+import sys
+import requests
+import zipfile
+import shutil
+import logging
+from pathlib import Path
+from typing import Optional
+from urllib.parse import urljoin
+
+from ..core.config import ADMIN_SERVER_URL, ADMIN_API_KEY, LUA_REMOTE_ONLY
+
+logger = logging.getLogger(__name__)
+HF_REPO = os.getenv("HF_LUA_REPO") or os.getenv("HF_REPO_ID", "otoshi/lua-files")
+HF_REVISION = os.getenv("HF_REVISION", "main")
+HUGGINGFACE_TOKEN = os.getenv("HUGGINGFACE_TOKEN", "")
+LUA_CACHE_DIR = Path(os.getenv("APPDATA", ".")) / "otoshi_launcher" / "lua_cache"
+
+HF_CDN_URL = "https://huggingface.co"
+HF_DATASET_API = f"https://huggingface.co/api/datasets/{HF_REPO}"
+
+
+class LuaSyncService:
+    def __init__(self):
+        self.admin_url = ADMIN_SERVER_URL
+        self.cache_dir = LUA_CACHE_DIR
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        self.admin_headers = {"X-API-Key": ADMIN_API_KEY} if ADMIN_API_KEY else {}
+        self.hf_headers = {"Authorization": f"Bearer {HUGGINGFACE_TOKEN}"} if HUGGINGFACE_TOKEN else {}
+
+    def sync(self) -> bool:
+        """Sync lua files from admin server or Hugging Face if needed"""
+        if LUA_REMOTE_ONLY:
+            return self._sync_admin_only()
+        try:
+            # Try admin server first
+            remote_version = self._fetch_remote_version()
+            local_version = self._get_local_version()
+            
+            if remote_version and remote_version != local_version:
+                logger.info(f"Syncing lua files: {local_version} -> {remote_version}")
+                if self._download_lua_bundle(remote_version):
+                    return True
+            elif remote_version:
+                logger.debug(f"Lua files up to date: {local_version}")
+                return False
+        except Exception as e:
+            logger.debug(f"Admin sync failed: {e}")
+
+        # Fallback to Hugging Face
+        try:
+            return self._sync_from_huggingface()
+        except Exception as hf_error:
+            logger.debug(f"Hugging Face sync failed: {hf_error}")
+
+        # Final fallback: copy bundled files
+        self._ensure_local_lua()
+        return False
+
+    def _sync_admin_only(self) -> bool:
+        """Sync lua files strictly from admin server (no HF/local fallback)."""
+        remote_version = self._fetch_remote_version()
+        if not remote_version:
+            logger.warning("LUA_REMOTE_ONLY enabled but admin version unavailable")
+            return False
+        local_version = self._get_local_version()
+        if remote_version != local_version:
+            logger.info(f"Syncing lua files: {local_version} -> {remote_version}")
+            return self._download_lua_bundle(remote_version)
+        logger.debug(f"Lua files up to date: {local_version}")
+        return False
+
+    def _fetch_remote_version(self) -> Optional[str]:
+        """Fetch version from admin server"""
+        try:
+            resp = requests.get(
+                f"{self.admin_url}/api/v1/lua/version",
+                headers=self.admin_headers,
+                timeout=10
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            version = data.get("version")
+            if version:
+                return str(version).strip()
+            return None
+        except Exception as e:
+            logger.debug(f"Failed to fetch version from admin: {e}")
+            return None
+
+    def _download_lua_bundle(self, version: str) -> bool:
+        """Download lua bundle from admin server"""
+        try:
+            logger.info(f"Downloading lua bundle version {version} from admin...")
+            resp = requests.get(
+                f"{self.admin_url}/api/v1/lua/bundle.zip",
+                headers=self.admin_headers,
+                timeout=120,
+                stream=True
+            )
+            resp.raise_for_status()
+
+            zip_path = self.cache_dir / "lua_bundle.zip"
+            with open(zip_path, "wb") as f:
+                for chunk in resp.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+
+            # Extract
+            with zipfile.ZipFile(zip_path, "r") as z:
+                z.extractall(self.cache_dir)
+
+            zip_path.unlink()
+
+            if not self._normalize_lua_cache():
+                logger.error("Lua bundle extracted but no lua files found")
+                return False
+
+            # Save version
+            (self.cache_dir / "version.txt").write_text(version)
+            logger.info("Lua files synced from admin successfully")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to download lua bundle: {e}")
+            return False
+
+    def _sync_from_huggingface(self) -> bool:
+        """Fallback: Sync lua files from Hugging Face with proper auth"""
+        try:
+            logger.info(f"Attempting to sync from Hugging Face: {HF_REPO}")
+
+            # Try with bearer token first
+            hf_zip_url = f"https://huggingface.co/datasets/{HF_REPO}/raw/{HF_REVISION}/lua-files.zip"
+            logger.info(f"Downloading from: {hf_zip_url}")
+
+            headers = self.hf_headers or {}
+            resp = requests.get(
+                hf_zip_url,
+                headers=headers,
+                timeout=120,
+                stream=True
+            )
+
+            if resp.status_code == 404:
+                alt_path = self._find_hf_lua_zip(headers)
+                if alt_path:
+                    hf_zip_url = f"https://huggingface.co/datasets/{HF_REPO}/resolve/{HF_REVISION}/{alt_path}"
+                    logger.info(f"Retrying with detected lua zip: {hf_zip_url}")
+                    resp = requests.get(
+                        hf_zip_url,
+                        headers=headers,
+                        timeout=120,
+                        stream=True
+                    )
+
+            if resp.status_code in (401, 403) and headers.get("Authorization"):
+                logger.warning("Hugging Face auth failed - retrying without token")
+                resp = requests.get(
+                    hf_zip_url,
+                    headers={},
+                    timeout=120,
+                    stream=True
+                )
+            if resp.status_code in (401, 403):
+                logger.warning("Hugging Face authentication failed")
+                return False
+
+            resp.raise_for_status()
+
+            zip_path = self.cache_dir / "lua_bundle_hf.zip"
+            with open(zip_path, "wb") as f:
+                for chunk in resp.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+
+            # Extract
+            with zipfile.ZipFile(zip_path, "r") as z:
+                z.extractall(self.cache_dir)
+
+            zip_path.unlink()
+
+            if not self._normalize_lua_cache():
+                logger.warning("Hugging Face bundle extracted but no lua files found")
+                return False
+
+            # Mark as HF version
+            (self.cache_dir / "version.txt").write_text("huggingface-1.0.0")
+            logger.info("Lua files synced from Hugging Face")
+            return True
+        except requests.exceptions.Timeout:
+            logger.warning("Hugging Face request timed out")
+            return False
+        except Exception as e:
+            logger.debug(f"Hugging Face sync failed: {e}")
+            return False
+
+    def _find_hf_lua_zip(self, headers: dict) -> Optional[str]:
+        """Discover a lua zip file in the HF dataset."""
+        api_url = f"https://huggingface.co/api/datasets/{HF_REPO}/tree/{HF_REVISION}"
+        resp = requests.get(api_url, headers=headers, timeout=15)
+        if resp.status_code in (401, 403) and headers.get("Authorization"):
+            resp = requests.get(api_url, headers={}, timeout=15)
+        if resp.status_code != 200:
+            return None
+        try:
+            items = resp.json()
+        except Exception:
+            return None
+        candidates = []
+        for item in items:
+            if item.get("type") != "file":
+                continue
+            path = str(item.get("path") or "")
+            lower = path.lower()
+            if not lower.endswith(".zip"):
+                continue
+            if "lua" in lower:
+                candidates.append(path)
+        if not candidates:
+            return None
+        preferred = ["lua-files.zip", "lua_files.zip", "lua.zip"]
+        for name in preferred:
+            for path in candidates:
+                if path.lower().endswith(name):
+                    return path
+        candidates.sort(key=lambda p: (len(p), p.lower()))
+        return candidates[0]
+
+    def _get_local_version(self) -> Optional[str]:
+        """Get cached version"""
+        version_file = self.cache_dir / "version.txt"
+        if version_file.exists():
+            try:
+                return version_file.read_text().strip()
+            except Exception:
+                return None
+        return None
+
+    def _get_bundled_lua_dir(self) -> Optional[Path]:
+        """Find bundled lua files (PyInstaller, portable, or dev)"""
+        paths_to_check = []
+
+        # 1. PyInstaller bundle (_MEIPASS)
+        if getattr(sys, 'frozen', False):
+            paths_to_check.append(Path(sys._MEIPASS) / "lua_files")
+            paths_to_check.append(Path(sys.executable).parent / "lua_files")
+
+        # 2. Development mode
+        paths_to_check.append(Path(__file__).resolve().parents[3] / "lua_files")
+
+        # 3. Relative to backend
+        paths_to_check.append(Path("./lua_files"))
+        paths_to_check.append(Path("../lua_files"))
+
+        # 4. Next to executable
+        if hasattr(sys, 'argv') and sys.argv:
+            paths_to_check.append(Path(sys.argv[0]).parent / "lua_files")
+
+        for path in paths_to_check:
+            if path.exists() and list(path.glob("*.lua")):
+                logger.info(f"Found bundled lua files at: {path}")
+                return path
+
+        return None
+    
+    def _ensure_local_lua(self):
+        """Ensure lua files exist locally (copy from bundle if needed)"""
+        if LUA_REMOTE_ONLY:
+            return
+        lua_dir = self.cache_dir / "lua_files"
+        
+        # If cache already has lua files, we're good
+        if lua_dir.exists() and list(lua_dir.glob("*.lua")):
+            logger.info(f"Using cached lua files from: {lua_dir}")
+            return
+        
+        # Copy from bundled location
+        bundled = self._get_bundled_lua_dir()
+        if bundled and bundled.exists():
+            logger.info(f"Copying bundled lua files from {bundled}")
+            lua_dir.mkdir(parents=True, exist_ok=True)
+            file_count = 0
+            for lua_file in bundled.glob("*.lua"):
+                shutil.copy2(lua_file, lua_dir / lua_file.name)
+                file_count += 1
+            logger.info(f"Copied {file_count} lua files")
+            # Mark as bundled version
+            (self.cache_dir / "version.txt").write_text("bundled-local")
+        else:
+            logger.error("No bundled lua files found!")
+
+    def _normalize_lua_cache(self) -> bool:
+        """Ensure lua files are placed under cache_dir/lua_files."""
+        lua_dir = self.cache_dir / "lua_files"
+        lua_dir.mkdir(parents=True, exist_ok=True)
+        if list(lua_dir.glob("*.lua")):
+            return True
+
+        moved = 0
+        for lua_file in self.cache_dir.glob("*.lua"):
+            try:
+                shutil.move(str(lua_file), lua_dir / lua_file.name)
+                moved += 1
+            except Exception:
+                continue
+
+        if not list(lua_dir.glob("*.lua")):
+            for candidate in self.cache_dir.iterdir():
+                if not candidate.is_dir():
+                    continue
+                files = list(candidate.glob("*.lua"))
+                if not files:
+                    continue
+                for lua_file in files:
+                    try:
+                        shutil.move(str(lua_file), lua_dir / lua_file.name)
+                        moved += 1
+                    except Exception:
+                        continue
+                if moved:
+                    break
+
+        return bool(list(lua_dir.glob("*.lua")))
+
+    def get_lua_dir(self) -> Path:
+        """Get lua files directory, ensuring it exists"""
+        self._ensure_local_lua()
+        lua_dir = self.cache_dir / "lua_files"
+        lua_dir.mkdir(parents=True, exist_ok=True)
+        return lua_dir
+
+
+# Global instance
+_lua_sync = LuaSyncService()
+
+
+def sync_lua_files() -> bool:
+    """Call this on backend startup"""
+    return _lua_sync.sync()
+
+
+def get_lua_files_dir() -> Path:
+    """Get lua files directory path"""
+    return _lua_sync.get_lua_dir()

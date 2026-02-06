@@ -1,0 +1,83 @@
+{
+  "latest_version": "1.0.0",
+  "versionCode": 1,
+  "releaseDate": "2026-02-04T00:00:00Z",
+  "release_notes": "OTOSHI Launcher 1.0.0 - Production Release\n\n- Multi-platform game library support (Steam, Epic, GOG)\n- OAuth authentication (Google, Steam, Epic, Discord)\n- Chunk-based download system with resume support\n- Portable and installer versions\n- Auto-update system with delta patching\n- Live Lua/UI editing without restart\n- Advanced download management\n- User authentication and profiles",
+  "pub_date": "2026-02-04T00:00:00Z",
+
+  "stable_channel": {
+    "version": "1.0.0",
+    "downloadUrl": "https://releases.otoshi.launcher/releases/1.0.0/OTOSHI_Launcher_1.0.0_Setup.exe",
+    "deltaUrl": null,
+    "fileSize": 125000000,
+    "fileSha256": "abc123def456",
+    "changelog": [
+      "Initial release",
+      "Core launcher features",
+      "Auto-update support",
+      "Download management",
+      "User authentication"
+    ]
+  },
+
+  "beta_channel": {
+    "version": "1.0.0",
+    "downloadUrl": "https://releases.otoshi.launcher/releases/1.0.0-beta/OTOSHI_Launcher_1.0.0-beta_Setup.exe",
+    "deltaUrl": null,
+    "fileSize": 125000000,
+    "fileSha256": "abc123def456",
+    "changelog": []
+  },
+
+  "dev_channel": {
+    "version": "1.0.0-dev",
+    "downloadUrl": "https://releases.otoshi.launcher/releases/1.0.0-dev/OTOSHI_Launcher_1.0.0-dev_Setup.exe",
+    "deltaUrl": null,
+    "fileSize": 125000000,
+    "fileSha256": "abc123def456",
+    "changelog": []
+  },
+
+  "download_urls": {
+    "windows-x86_64": "https://releases.otoshi.launcher/releases/1.0.0/OTOSHI_Launcher_1.0.0_Setup.exe",
+    "windows-aarch64": "",
+    "linux-x86_64": "",
+    "darwin-x86_64": "",
+    "darwin-aarch64": ""
+  },
+
+  "signatures": {
+    "windows-x86_64": "",
+    "windows-aarch64": "",
+    "linux-x86_64": "",
+    "darwin-x86_64": "",
+    "darwin-aarch64": ""
+  },
+
+  "features": {
+    "chunk_downloads_enabled": true,
+    "steam_integration_enabled": true,
+    "epic_integration_enabled": true,
+    "gog_integration_enabled": true,
+    "discord_oauth_enabled": true,
+    "auto_update_enabled": true,
+    "delta_patching_enabled": true,
+    "live_reload_enabled": true
+  },
+
+  "rollback": {
+    "enabled": true,
+    "maxRollbackVersions": 3,
+    "history": [
+      {
+        "version": "1.0.0",
+        "installedDate": "2026-02-04T00:00:00Z",
+        "channel": "stable"
+      }
+    ]
+  },
+
+  "announcements": [],
+  "maintenance_mode": false,
+  "maintenance_message": ""
+}
