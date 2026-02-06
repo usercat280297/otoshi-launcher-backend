@@ -1,35 +1,14 @@
-# Python cache / env
-__pycache__/
-*.py[cod]
-venv/
-.venv/
-.venv*/
+# Allowlist: only commit what is necessary
+*
+!.gitignore
+!requirements.txt
+!render.yaml
+!app/
+!app/**
 
-# Local data & logs
-*.db
-*.sqlite3
-*.log
-.env
-.env.*
-
-# Build artifacts
-build/
-dist/
-
-# Runtime storage
-storage/
-keys/
-auto_chunk_check_update/
-
-# Large SDKs / optional tooling
-epicgame-SDK/
-scripts/
-
-# Packaging helpers (keep local only)
-bundle_lua.py
-otoshi-backend.spec
-otoshi_backend_entry.py
-run_server.py
-tauri_update_commands.py
-steam_news_enhanced.hpp
-steam_news_enhanced.rs
+# Re-ignore generated files inside app
+app/**/__pycache__/
+app/**/*.py[cod]
+app/**/.pytest_cache/
+app/**/.mypy_cache/
+app/**/.ruff_cache/
