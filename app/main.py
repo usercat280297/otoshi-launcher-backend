@@ -104,15 +104,7 @@ def _ensure_storage_dirs() -> None:
         if path:
             Path(path).mkdir(parents=True, exist_ok=True)
 
-
-@app.on_event("startup")
-def on_startup() -> None:
-    Base.metadata.create_all(bind=engine)
-    ensure_schema()
-    cache_client.connect()
-    _ensure_storage_dirs()
-    
-    # Sync lua files from admin server or Hugging Face
+def _start_lua_sync() -> None:
     try:
         from .services.lua_sync import sync_lua_files, get_lua_files_dir
         result = sync_lua_files()
@@ -123,7 +115,18 @@ def on_startup() -> None:
         else:
             print(f"Using local/bundled lua files ({lua_count} files)")
     except Exception as e:
-        print(f"Lua sync error: {e} (launcher will continue with bundled files)")
+        print(f"Lua sync error: {e} (launcher will continue)")
+
+
+@app.on_event("startup")
+def on_startup() -> None:
+    Base.metadata.create_all(bind=engine)
+    ensure_schema()
+    cache_client.connect()
+    _ensure_storage_dirs()
+
+    # Sync lua files in background to avoid blocking startup/port scan
+    threading.Thread(target=_start_lua_sync, daemon=True).start()
 
     db = SessionLocal()
     try:
