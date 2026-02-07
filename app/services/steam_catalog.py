@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import html
 import re
+import threading
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Iterable, Optional, Any, Dict, List
@@ -433,9 +434,22 @@ def _attempt_lua_sync() -> None:
     try:
         if cache_client.get("lua:sync_attempt"):
             return
-        from .lua_sync import sync_lua_files
-        sync_lua_files()
+        if cache_client.get("lua:sync_in_progress"):
+            return
+
+        cache_client.set("lua:sync_in_progress", "1", ttl=STEAM_CATALOG_CACHE_TTL_SECONDS)
         cache_client.set("lua:sync_attempt", "1", ttl=STEAM_CATALOG_CACHE_TTL_SECONDS)
+
+        def _run() -> None:
+            try:
+                from .lua_sync import sync_lua_files
+                sync_lua_files()
+            except Exception:
+                pass
+            finally:
+                cache_client.delete("lua:sync_in_progress")
+
+        threading.Thread(target=_run, daemon=True).start()
     except Exception:
         pass
 
