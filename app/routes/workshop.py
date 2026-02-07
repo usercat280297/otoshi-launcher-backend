@@ -8,8 +8,9 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
-from ..core.config import WORKSHOP_STORAGE_DIR
+from ..core.config import WORKSHOP_STORAGE_DIR, WORKSHOP_STEAM_APP_ID
 from ..core.cache import cache_client
+from ..services.steam_workshop import get_workshop_app_ids, query_workshop_items, query_workshop_multi
 from ..db import get_db
 from ..models import (
     WorkshopItem,
@@ -60,7 +61,20 @@ def list_items(
     items = query.order_by(WorkshopItem.updated_at.desc()).all()
     payload = [WorkshopItemOut.model_validate(item).model_dump() for item in items]
     cache_client.set_json(cache_key, payload)
-    return items
+    return payload
+
+
+@router.get("/steam", response_model=List[WorkshopItemOut])
+def list_steam_items(
+    app_id: Optional[str] = None,
+    search: Optional[str] = None,
+    limit: int = 24,
+):
+    if app_id and app_id.lower() != "all":
+        return query_workshop_items(app_id, search=search, limit=limit)
+
+    app_ids = get_workshop_app_ids()
+    return query_workshop_multi(app_ids, search=search, total_limit=limit)
 
 
 @router.get("/items/{item_id}", response_model=WorkshopItemOut)

@@ -3,7 +3,26 @@ from sqlalchemy.orm import declarative_base, sessionmaker
 
 from .core.config import DATABASE_URL, DB_MAX_OVERFLOW, DB_POOL_RECYCLE, DB_POOL_SIZE
 
-is_sqlite = DATABASE_URL.startswith("sqlite")
+def _resolve_database_url(url: str) -> str:
+    if url.startswith("postgresql+"):
+        return url
+    if not url.startswith("postgresql://"):
+        return url
+    try:
+        import psycopg2  # noqa: F401
+        return url
+    except Exception:
+        pass
+    try:
+        import psycopg  # noqa: F401
+        return url.replace("postgresql://", "postgresql+psycopg://", 1)
+    except Exception:
+        return url
+
+
+EFFECTIVE_DATABASE_URL = _resolve_database_url(DATABASE_URL)
+
+is_sqlite = EFFECTIVE_DATABASE_URL.startswith("sqlite")
 connect_args = {"check_same_thread": False} if is_sqlite else {}
 
 engine_kwargs = {
@@ -19,7 +38,7 @@ if not is_sqlite:
         }
     )
 
-engine = create_engine(DATABASE_URL, **engine_kwargs)
+engine = create_engine(EFFECTIVE_DATABASE_URL, **engine_kwargs)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 Base = declarative_base()

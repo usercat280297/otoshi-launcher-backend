@@ -111,6 +111,7 @@ class UserPublicOut(BaseModel):
 class GameOut(BaseModel):
     id: str
     slug: str
+    steam_app_id: Optional[str] = None
     title: str
     tagline: Optional[str]
     short_description: Optional[str] = None
@@ -478,6 +479,7 @@ class WorkshopItemOut(BaseModel):
     preview_image_url: Optional[str]
     created_at: datetime
     updated_at: datetime
+    source: Optional[str] = None
 
     class Config:
         from_attributes = True

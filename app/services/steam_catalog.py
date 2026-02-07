@@ -492,6 +492,66 @@ def get_lua_appids() -> List[str]:
     return appids
 
 
+def _lua_file_has_workshop_marker(path: Path) -> bool:
+    try:
+        with path.open("r", encoding="utf-8", errors="ignore") as handle:
+            for _ in range(20):
+                line = handle.readline()
+                if not line:
+                    break
+                if "supports Steam Workshop content" in line:
+                    return True
+    except OSError:
+        return False
+    return False
+
+
+def get_lua_workshop_appids() -> List[str]:
+    cache_key = "steam:lua_workshop_appids"
+    cached = cache_client.get_json(cache_key)
+    if cached:
+        return cached
+
+    if LUA_REMOTE_ONLY:
+        # Remote source does not expose workshop markers, fall back to all appids.
+        appids = get_lua_appids()
+        cache_client.set_json(cache_key, appids, ttl=STEAM_CATALOG_CACHE_TTL_SECONDS)
+        return appids
+
+    appids: List[str] = []
+    seen = set()
+    lua_dir = _lua_dir()
+    if not lua_dir.exists() or not _has_lua_files(lua_dir):
+        _attempt_lua_sync()
+        lua_dir = _lua_dir()
+    if not lua_dir.exists() or not _has_lua_files(lua_dir):
+        return get_lua_appids()
+
+    for item in lua_dir.glob("*.lua"):
+        if not _lua_file_has_workshop_marker(item):
+            continue
+        stem = item.stem.strip()
+        appid = None
+        if stem.isdigit():
+            appid = stem
+        else:
+            match = re.search(r"\d{3,}", stem)
+            if match:
+                appid = match.group(0)
+        if appid and appid not in seen:
+            seen.add(appid)
+            appids.append(appid)
+
+    if not appids:
+        appids = get_lua_appids()
+    else:
+        appids = sorted(appids, key=int)
+        appids = prioritize_appids(appids)
+
+    cache_client.set_json(cache_key, appids, ttl=STEAM_CATALOG_CACHE_TTL_SECONDS)
+    return appids
+
+
 def get_steam_summary(appid: str) -> Optional[dict]:
     cache_key = f"steam:summary:{appid}"
     cached = cache_client.get_json(cache_key)

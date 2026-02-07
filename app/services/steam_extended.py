@@ -13,6 +13,7 @@ from datetime import timezone
 import re
 from xml.etree import ElementTree as ET
 from pydantic import BaseModel
+from bs4 import BeautifulSoup
 import requests
 
 from ..core.cache import cache_client
@@ -27,11 +28,81 @@ from ..core.config import (
 
 logger = logging.getLogger(__name__)
 
+TAG_RE = re.compile(r"<[^>]+>")
+
+
+def _strip_html(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return None
+    text = value.replace("<br>", "\n").replace("<br/>", "\n").replace("<br />", "\n")
+    text = TAG_RE.sub("", text)
+    return text.strip() or None
+
+
+def _resolve_dlc_image(dlc_info: dict, dlc_id: str) -> Optional[str]:
+    if not isinstance(dlc_info, dict):
+        return f"https://cdn.cloudflare.steamstatic.com/steam/apps/{dlc_id}/header.jpg"
+    for key in (
+        "header_image",
+        "capsule_imagev5",
+        "capsule_image",
+        "small_capsule_image",
+        "library_capsule",
+        "library_600x900",
+        "library_header",
+    ):
+        value = dlc_info.get(key)
+        if value:
+            return value
+    return f"https://cdn.cloudflare.steamstatic.com/steam/apps/{dlc_id}/header.jpg"
+
+
+def _fetch_store_meta(app_id: str) -> dict:
+    cache_key = f"steam:dlc:meta:{app_id}"
+    cached = cache_client.get_json(cache_key)
+    if cached is not None:
+        return cached
+
+    url = f"https://store.steampowered.com/app/{app_id}/?l=en"
+    try:
+        response = requests.get(
+            url,
+            timeout=STEAM_REQUEST_TIMEOUT_SECONDS,
+            headers={"User-Agent": "otoshi-launcher/1.0"},
+        )
+    except requests.RequestException:
+        cache_client.set_json(cache_key, {}, ttl=STEAM_CACHE_TTL_SECONDS)
+        return {}
+
+    if response.status_code != 200:
+        cache_client.set_json(cache_key, {}, ttl=STEAM_CACHE_TTL_SECONDS)
+        return {}
+
+    soup = BeautifulSoup(response.text, "html.parser")
+    def _meta(prop: str) -> Optional[str]:
+        tag = soup.find("meta", attrs={"property": prop})
+        if tag and tag.get("content"):
+            return tag.get("content")
+        tag = soup.find("meta", attrs={"name": prop})
+        if tag and tag.get("content"):
+            return tag.get("content")
+        return None
+
+    meta = {
+        "image": _meta("og:image") or _meta("twitter:image"),
+        "title": _meta("og:title"),
+        "description": _meta("og:description"),
+    }
+    cache_client.set_json(cache_key, meta, ttl=STEAM_CACHE_TTL_SECONDS)
+    return meta
+
 
 class SteamDLC(BaseModel):
     app_id: str
     name: str
     header_image: Optional[str] = None
+    description: Optional[str] = None
+    release_date: Optional[str] = None
     price: Optional[dict] = None
 
 
@@ -89,14 +160,11 @@ def get_steam_dlc(app_id: str) -> List[dict]:
     cache_key = f"steam:dlc:{app_id}"
     cached = cache_client.get_json(cache_key)
     if cached is not None:
-        def _has_image(item: dict) -> bool:
+        def _has_required_fields(item: dict) -> bool:
             if not isinstance(item, dict):
                 return False
-            if item.get("image"):
-                return True
-            imgs = item.get("images") or []
-            return isinstance(imgs, list) and len(imgs) > 0
-        if all(_has_image(item) for item in cached):
+            return bool(item.get("header_image")) and bool(item.get("description") or item.get("short_description"))
+        if all(_has_required_fields(item) for item in cached):
             return cached
 
     url = f"{STEAM_STORE_API_URL.rstrip('/')}/appdetails"
@@ -124,6 +192,7 @@ def get_steam_dlc(app_id: str) -> List[dict]:
     # Fetch details for DLC items (batch up to 20 at a time)
     dlc_list = []
     batch_size = 20
+    enrich_budget = 12
 
     for i in range(0, len(dlc_ids), batch_size):
         batch_ids = dlc_ids[i:i + batch_size]
@@ -133,40 +202,71 @@ def get_steam_dlc(app_id: str) -> List[dict]:
             "appids": batch_str,
             "cc": "us",
             "l": "en",
-            "filters": "basic,price_overview",
+            "filters": "basic,price_overview,short_description,release_date",
         })
 
-        if dlc_payload:
-            for dlc_id in batch_ids:
-                dlc_data = dlc_payload.get(str(dlc_id), {})
-                if dlc_data.get("success"):
-                    dlc_info = dlc_data.get("data", {})
-                    price_overview = dlc_info.get("price_overview")
-                    price = None
-                    if price_overview:
-                        price = {
-                            "initial": price_overview.get("initial"),
-                            "final": price_overview.get("final"),
-                            "discount_percent": price_overview.get("discount_percent", 0),
-                            "currency": price_overview.get("currency"),
-                            "formatted": price_overview.get("initial_formatted"),
-                            "final_formatted": price_overview.get("final_formatted"),
-                        }
-                    elif dlc_info.get("is_free"):
-                        price = {
-                            "initial": 0,
-                            "final": 0,
-                            "discount_percent": 0,
-                            "formatted": "Free",
-                            "final_formatted": "Free",
-                        }
+        if dlc_payload is None:
+            dlc_payload = {}
 
-                    dlc_list.append({
-                        "app_id": str(dlc_id),
-                        "name": dlc_info.get("name", f"DLC {dlc_id}"),
-                        "header_image": dlc_info.get("header_image"),
-                        "price": price,
-                    })
+        for dlc_id in batch_ids:
+            dlc_data = dlc_payload.get(str(dlc_id), {})
+            dlc_info = dlc_data.get("data", {}) if dlc_data.get("success") else {}
+
+            price_overview = dlc_info.get("price_overview")
+            price = None
+            if price_overview:
+                price = {
+                    "initial": price_overview.get("initial"),
+                    "final": price_overview.get("final"),
+                    "discount_percent": price_overview.get("discount_percent", 0),
+                    "currency": price_overview.get("currency"),
+                    "formatted": price_overview.get("initial_formatted"),
+                    "final_formatted": price_overview.get("final_formatted"),
+                }
+            elif dlc_info.get("is_free"):
+                price = {
+                    "initial": 0,
+                    "final": 0,
+                    "discount_percent": 0,
+                    "formatted": "Free",
+                    "final_formatted": "Free",
+                }
+
+            description = _strip_html(dlc_info.get("short_description")) or "Additional content for this game."
+            release_date = None
+            if isinstance(dlc_info.get("release_date"), dict):
+                release_date = dlc_info.get("release_date", {}).get("date")
+
+            fallback_header = f"https://cdn.cloudflare.steamstatic.com/steam/apps/{dlc_id}/header.jpg"
+            header_image = _resolve_dlc_image(dlc_info, str(dlc_id))
+            name = dlc_info.get("name", f"DLC {dlc_id}")
+
+            needs_meta = (
+                not header_image
+                or header_image == fallback_header
+                or name.startswith("DLC ")
+                or description == "Additional content for this game."
+            )
+            if needs_meta and enrich_budget > 0:
+                meta = _fetch_store_meta(str(dlc_id))
+                if meta.get("image"):
+                    header_image = meta["image"]
+                if meta.get("title") and (name.startswith("DLC ") or name == f"DLC {dlc_id}"):
+                    cleaned = meta["title"].replace(" on Steam", "").strip()
+                    if cleaned:
+                        name = cleaned
+                if meta.get("description") and description == "Additional content for this game.":
+                    description = meta["description"]
+                enrich_budget -= 1
+
+            dlc_list.append({
+                "app_id": str(dlc_id),
+                "name": name,
+                "header_image": header_image,
+                "description": description,
+                "release_date": release_date,
+                "price": price,
+            })
 
     cache_client.set_json(cache_key, dlc_list, ttl=STEAM_CACHE_TTL_SECONDS)
     return dlc_list

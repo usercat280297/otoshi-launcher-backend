@@ -205,6 +205,18 @@ MANIFEST_CACHE_DIR = os.getenv("MANIFEST_CACHE_DIR", ".manifests")
 WORKSHOP_STORAGE_DIR = os.getenv("WORKSHOP_STORAGE_DIR", "storage/workshop")
 SCREENSHOT_STORAGE_DIR = os.getenv("SCREENSHOT_STORAGE_DIR", "storage/screenshots")
 BUILD_STORAGE_DIR = os.getenv("BUILD_STORAGE_DIR", "storage/builds")
+WORKSHOP_STEAM_APP_ID = os.getenv("WORKSHOP_STEAM_APP_ID", "")
+WORKSHOP_STEAM_APP_IDS = os.getenv("WORKSHOP_STEAM_APP_IDS", "")
+WORKSHOP_STEAM_SOURCE = os.getenv("WORKSHOP_STEAM_SOURCE", "env").lower()
+WORKSHOP_STEAM_MAX_APPIDS = int(os.getenv("WORKSHOP_STEAM_MAX_APPIDS", "120"))
+WORKSHOP_STEAM_PER_GAME = int(os.getenv("WORKSHOP_STEAM_PER_GAME", "2"))
+WORKSHOP_STEAM_LIMIT = int(os.getenv("WORKSHOP_STEAM_LIMIT", "60"))
+DISCOVERY_FORCE_STEAM = os.getenv("DISCOVERY_FORCE_STEAM", "false").lower() in (
+    "1",
+    "true",
+    "yes",
+    "on",
+)
 
 CDN_PRIMARY_URLS = os.getenv("CDN_PRIMARY_URLS", "http://localhost:8000").split(",")
 CDN_FALLBACK_URLS = os.getenv("CDN_FALLBACK_URLS", "http://127.0.0.1:8000").split(",")
