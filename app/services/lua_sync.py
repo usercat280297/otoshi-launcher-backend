@@ -36,12 +36,15 @@ class LuaSyncService:
 
     def sync(self) -> bool:
         """Sync lua files from admin server or Hugging Face if needed"""
+        print(f"[LuaSync] Cache dir: {self.cache_dir}")
+        print(f"[LuaSync] LUA_REMOTE_ONLY={LUA_REMOTE_ONLY}")
         if LUA_REMOTE_ONLY:
             return self._sync_admin_only()
         try:
             # Try admin server first
             remote_version = self._fetch_remote_version()
             local_version = self._get_local_version()
+            print(f"[LuaSync] Admin version={remote_version} local_version={local_version}")
             
             if remote_version and remote_version != local_version:
                 logger.info(f"Syncing lua files: {local_version} -> {remote_version}")
@@ -57,7 +60,7 @@ class LuaSyncService:
         try:
             return self._sync_from_huggingface()
         except Exception as hf_error:
-            logger.debug(f"Hugging Face sync failed: {hf_error}")
+            print(f"[LuaSync] Hugging Face sync failed: {hf_error}")
 
         # Final fallback: copy bundled files
         self._ensure_local_lua()
@@ -137,7 +140,9 @@ class LuaSyncService:
                 logger.info("Lua cache already present (HF); skipping download")
                 return False
 
-            logger.info(f"Attempting to sync from Hugging Face: {HF_REPO}")
+            print(f"[LuaSync] Attempting to sync from Hugging Face: {HF_REPO}@{HF_REVISION}")
+            print(f"[LuaSync] HF_LUA_ZIP_PATH={HF_LUA_ZIP_PATH}")
+            print(f"[LuaSync] HF token set={bool(HUGGINGFACE_TOKEN)}")
 
             # Try preferred path first (supports nested lua_files/ folder)
             preferred_paths = []
@@ -150,8 +155,9 @@ class LuaSyncService:
             headers = self.hf_headers or {}
             for path in preferred_paths:
                 candidate = f"https://huggingface.co/datasets/{HF_REPO}/resolve/{HF_REVISION}/{path}"
-                logger.info(f"Trying lua zip: {candidate}")
+                print(f"[LuaSync] Trying lua zip: {candidate}")
                 resp = requests.get(candidate, headers=headers, timeout=30, stream=True)
+                print(f"[LuaSync] Response: {resp.status_code} for {candidate}")
                 if resp.status_code == 200:
                     hf_zip_url = candidate
                     break
@@ -162,10 +168,10 @@ class LuaSyncService:
                 discovered_path = self._find_hf_lua_zip(headers)
                 if discovered_path:
                     hf_zip_url = f"https://huggingface.co/datasets/{HF_REPO}/resolve/{HF_REVISION}/{discovered_path}"
-                    logger.info(f"Retrying with detected lua zip: {hf_zip_url}")
+                    print(f"[LuaSync] Retrying with detected lua zip: {hf_zip_url}")
 
             if not hf_zip_url:
-                logger.warning("No lua zip found in Hugging Face repo")
+                print("[LuaSync] No lua zip found in Hugging Face repo")
                 return False
 
             resp = requests.get(hf_zip_url, headers=headers, timeout=120, stream=True)
@@ -174,11 +180,11 @@ class LuaSyncService:
                 alt_path = self._find_hf_lua_zip(headers)
                 if alt_path:
                     hf_zip_url = f"https://huggingface.co/datasets/{HF_REPO}/resolve/{HF_REVISION}/{alt_path}"
-                    logger.info(f"Retrying with detected lua zip: {hf_zip_url}")
+                    print(f"[LuaSync] Retrying with detected lua zip: {hf_zip_url}")
                     resp = requests.get(hf_zip_url, headers=headers, timeout=120, stream=True)
 
             if resp.status_code in (401, 403) and headers.get("Authorization"):
-                logger.warning("Hugging Face auth failed - retrying without token")
+                print("[LuaSync] Hugging Face auth failed - retrying without token")
                 resp = requests.get(
                     hf_zip_url,
                     headers={},
@@ -186,7 +192,7 @@ class LuaSyncService:
                     stream=True
                 )
             if resp.status_code in (401, 403):
-                logger.warning("Hugging Face authentication failed")
+                print("[LuaSync] Hugging Face authentication failed")
                 return False
 
             resp.raise_for_status()
@@ -204,18 +210,18 @@ class LuaSyncService:
             zip_path.unlink()
 
             if not self._normalize_lua_cache():
-                logger.warning("Hugging Face bundle extracted but no lua files found")
+                print("[LuaSync] Hugging Face bundle extracted but no lua files found")
                 return False
 
             # Mark as HF version
             (self.cache_dir / "version.txt").write_text(f"huggingface:{HF_REPO}@{HF_REVISION}")
-            logger.info("Lua files synced from Hugging Face")
+            print("[LuaSync] Lua files synced from Hugging Face")
             return True
         except requests.exceptions.Timeout:
-            logger.warning("Hugging Face request timed out")
+            print("[LuaSync] Hugging Face request timed out")
             return False
         except Exception as e:
-            logger.debug(f"Hugging Face sync failed: {e}")
+            print(f"[LuaSync] Hugging Face sync failed: {e}")
             return False
 
     def _find_hf_lua_zip(self, headers: dict) -> Optional[str]:
@@ -356,29 +362,21 @@ class LuaSyncService:
             return True
 
         moved = 0
-        for lua_file in self.cache_dir.glob("*.lua"):
+        # Move any lua file from any depth into lua_dir
+        for lua_file in self.cache_dir.rglob("*.lua"):
             try:
-                shutil.move(str(lua_file), lua_dir / lua_file.name)
+                if lua_dir in lua_file.parents:
+                    continue
+                target = lua_dir / lua_file.name
+                if target.exists():
+                    continue
+                shutil.move(str(lua_file), target)
                 moved += 1
             except Exception:
                 continue
 
-        if not list(lua_dir.glob("*.lua")):
-            for candidate in self.cache_dir.iterdir():
-                if not candidate.is_dir():
-                    continue
-                files = list(candidate.glob("*.lua"))
-                if not files:
-                    continue
-                for lua_file in files:
-                    try:
-                        shutil.move(str(lua_file), lua_dir / lua_file.name)
-                        moved += 1
-                    except Exception:
-                        continue
-                if moved:
-                    break
-
+        if moved:
+            print(f"[LuaSync] Normalized lua cache: moved {moved} files into {lua_dir}")
         return bool(list(lua_dir.glob("*.lua")))
 
     def get_lua_dir(self) -> Path:
