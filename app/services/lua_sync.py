@@ -5,6 +5,7 @@ Fallback to bundled/local lua files if sync fails
 """
 import os
 import sys
+import json
 import requests
 import zipfile
 import shutil
@@ -147,21 +148,30 @@ class LuaSyncService:
             # Try preferred path first (supports nested lua_files/ folder)
             preferred_paths = []
             if HF_LUA_ZIP_PATH:
-                preferred_paths.append(HF_LUA_ZIP_PATH)
+                preferred_paths.append(HF_LUA_ZIP_PATH.split("?", 1)[0])
             preferred_paths.append("lua-files.zip")
             preferred_paths.append("lua_files.zip")
 
             hf_zip_url = ""
             headers = self.hf_headers or {}
-            for path in preferred_paths:
-                candidate = f"https://huggingface.co/datasets/{HF_REPO}/resolve/{HF_REVISION}/{path}"
-                print(f"[LuaSync] Trying lua zip: {candidate}")
+            if HF_LUA_ZIP_PATH and HF_LUA_ZIP_PATH.startswith("http"):
+                candidate = HF_LUA_ZIP_PATH
+                print(f"[LuaSync] Trying lua zip (full url): {candidate}")
                 resp = requests.get(candidate, headers=headers, timeout=30, stream=True)
                 print(f"[LuaSync] Response: {resp.status_code} for {candidate}")
                 if resp.status_code == 200:
                     hf_zip_url = candidate
-                    break
                 resp.close()
+            if not hf_zip_url:
+                for path in preferred_paths:
+                    candidate = f"https://huggingface.co/datasets/{HF_REPO}/resolve/{HF_REVISION}/{path}"
+                    print(f"[LuaSync] Trying lua zip: {candidate}")
+                    resp = requests.get(candidate, headers=headers, timeout=30, stream=True)
+                    print(f"[LuaSync] Response: {resp.status_code} for {candidate}")
+                    if resp.status_code == 200:
+                        hf_zip_url = candidate
+                        break
+                    resp.close()
 
             if not hf_zip_url:
                 # Fall back to auto-discovery in repo tree
@@ -359,6 +369,7 @@ class LuaSyncService:
         lua_dir = self.cache_dir / "lua_files"
         lua_dir.mkdir(parents=True, exist_ok=True)
         if list(lua_dir.glob("*.lua")):
+            self._write_appid_index(lua_dir)
             return True
 
         moved = 0
@@ -377,7 +388,36 @@ class LuaSyncService:
 
         if moved:
             print(f"[LuaSync] Normalized lua cache: moved {moved} files into {lua_dir}")
-        return bool(list(lua_dir.glob("*.lua")))
+        has_files = bool(list(lua_dir.glob("*.lua")))
+        if has_files:
+            self._write_appid_index(lua_dir)
+        return has_files
+
+    def _write_appid_index(self, lua_dir: Path) -> None:
+        """Write a cached appid list to avoid expensive directory scans."""
+        try:
+            appids = []
+            seen = set()
+            for lua_file in lua_dir.glob("*.lua"):
+                stem = lua_file.stem.strip()
+                appid = None
+                if stem.isdigit():
+                    appid = stem
+                else:
+                    import re
+                    match = re.search(r"\d{3,}", stem)
+                    if match:
+                        appid = match.group(0)
+                if appid and appid not in seen:
+                    seen.add(appid)
+                    appids.append(appid)
+            if appids:
+                appids = sorted(appids, key=int)
+            index_path = lua_dir / "appids.json"
+            index_path.write_text(json.dumps(appids), encoding="utf-8")
+            print(f"[LuaSync] Wrote appid index: {index_path} ({len(appids)} items)")
+        except Exception as e:
+            print(f"[LuaSync] Failed to write appid index: {e}")
 
     def get_lua_dir(self) -> Path:
         """Get lua files directory, ensuring it exists"""

@@ -19,6 +19,7 @@ from ..core.config import (
     LUA_REMOTE_ONLY,
     STEAM_CACHE_TTL_SECONDS,
     STEAM_CATALOG_CACHE_TTL_SECONDS,
+    STEAM_APPDETAILS_BATCH_SIZE,
     STEAM_REQUEST_TIMEOUT_SECONDS,
     STEAM_STORE_API_URL,
     STEAM_STORE_SEARCH_URL,
@@ -457,8 +458,18 @@ def _attempt_lua_sync() -> None:
 def get_lua_appids() -> List[str]:
     cache_key = "steam:lua_appids"
     cached = cache_client.get_json(cache_key)
-    if cached:
-        return cached
+    if cached is not None:
+        try:
+            if len(cached) > 0:
+                return cached
+        except TypeError:
+            return cached
+        # Cached empty list: if lua files now exist, refresh instead of returning stale empty cache.
+        lua_dir = _lua_dir()
+        if lua_dir.exists() and _has_lua_files(lua_dir):
+            cached = None
+        else:
+            return cached
 
     if LUA_REMOTE_ONLY:
         appids = get_lua_appids_from_server()
@@ -473,6 +484,20 @@ def get_lua_appids() -> List[str]:
         lua_dir = _lua_dir()
     if not lua_dir.exists() or not _has_lua_files(lua_dir):
         return []
+
+    # Fast path: use cached appid index if available
+    index_path = lua_dir / "appids.json"
+    if index_path.exists():
+        try:
+            import json
+            raw = json.loads(index_path.read_text(encoding="utf-8"))
+            if isinstance(raw, list) and raw:
+                appids = [str(x) for x in raw if str(x).isdigit()]
+                appids = prioritize_appids(appids)
+                cache_client.set_json(cache_key, appids, ttl=STEAM_CATALOG_CACHE_TTL_SECONDS)
+                return appids
+        except Exception:
+            pass
     
     for item in lua_dir.glob("*.lua"):
         stem = item.stem.strip()
@@ -486,6 +511,7 @@ def get_lua_appids() -> List[str]:
         if appid and appid not in seen:
             seen.add(appid)
             appids.append(appid)
+    if appids:
         appids = sorted(appids, key=int)
     appids = prioritize_appids(appids)
     cache_client.set_json(cache_key, appids, ttl=STEAM_CATALOG_CACHE_TTL_SECONDS)
@@ -509,8 +535,17 @@ def _lua_file_has_workshop_marker(path: Path) -> bool:
 def get_lua_workshop_appids() -> List[str]:
     cache_key = "steam:lua_workshop_appids"
     cached = cache_client.get_json(cache_key)
-    if cached:
-        return cached
+    if cached is not None:
+        try:
+            if len(cached) > 0:
+                return cached
+        except TypeError:
+            return cached
+        lua_dir = _lua_dir()
+        if lua_dir.exists() and _has_lua_files(lua_dir):
+            cached = None
+        else:
+            return cached
 
     if LUA_REMOTE_ONLY:
         # Remote source does not expose workshop markers, fall back to all appids.
@@ -598,17 +633,18 @@ def get_catalog_page(appids: List[str]) -> List[Dict[str, Any]]:
 
     fetched: Dict[str, Dict[str, Any]] = {}
     if missing:
-        max_workers = min(8, len(missing))
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            future_map = {executor.submit(get_steam_summary, appid): appid for appid in missing}
-            for future in as_completed(future_map):
-                appid = future_map[future]
-                try:
-                    summary = future.result()
-                except Exception:
-                    summary = None
-                if summary:
-                    fetched[appid] = summary
+        batch_size = max(1, STEAM_APPDETAILS_BATCH_SIZE)
+        # Batch appdetails requests to avoid N parallel HTTP calls (faster and more reliable).
+        for i in range(0, len(missing), batch_size):
+            batch = missing[i : i + batch_size]
+            payload = _store_appdetails(batch, filters="basic,price_overview,platforms,genres,release_date")
+            for appid in batch:
+                entry = payload.get(str(appid), {}) if isinstance(payload, dict) else {}
+                if not entry or not entry.get("success"):
+                    continue
+                summary = _summary_from_payload(appid, entry.get("data") or {})
+                cache_client.set_json(f"steam:summary:{appid}", summary, ttl=STEAM_CACHE_TTL_SECONDS)
+                fetched[appid] = summary
 
     for appid in appids:
         summary = cached_map.get(appid) or fetched.get(appid)
