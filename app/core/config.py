@@ -96,13 +96,27 @@ DB_POOL_SIZE = int(os.getenv("DB_POOL_SIZE", "10"))
 DB_MAX_OVERFLOW = int(os.getenv("DB_MAX_OVERFLOW", "20"))
 DB_POOL_RECYCLE = int(os.getenv("DB_POOL_RECYCLE", "3600"))
 
-CORS_ORIGINS = os.getenv(
-    "CORS_ORIGINS",
+_DEFAULT_CORS_ORIGINS = (
     "tauri://localhost,http://tauri.localhost,https://tauri.localhost,"
     "http://localhost:5173,http://localhost:5174,http://localhost:5175,"
     "http://localhost:5176,http://localhost:1234,http://127.0.0.1:5173,http://127.0.0.1:5174,"
     "http://127.0.0.1:5175,http://127.0.0.1:5176,http://127.0.0.1:1234"
-).split(",")
+)
+
+def _normalize_cors(origins: str) -> list[str]:
+    items: list[str] = []
+    for raw in origins.split(","):
+        value = raw.strip()
+        if value and value not in items:
+            items.append(value)
+    return items
+
+_raw_cors = os.getenv("CORS_ORIGINS", _DEFAULT_CORS_ORIGINS)
+CORS_ORIGINS = _normalize_cors(_raw_cors)
+# Always allow Tauri origins even when CORS_ORIGINS is overridden.
+for required_origin in ("tauri://localhost", "https://tauri.localhost", "http://tauri.localhost"):
+    if required_origin not in CORS_ORIGINS:
+        CORS_ORIGINS.append(required_origin)
 
 FRONTEND_BASE_URL = os.getenv("FRONTEND_BASE_URL", "http://localhost:5173")
 OAUTH_CALLBACK_BASE_URL = os.getenv("OAUTH_CALLBACK_BASE_URL", "")
