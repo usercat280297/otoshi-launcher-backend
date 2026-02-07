@@ -418,6 +418,12 @@ def _lua_dir() -> Path:
 
 
 def _has_lua_files(lua_dir: Path) -> bool:
+    index_path = lua_dir / "appids.json"
+    try:
+        if index_path.exists() and index_path.stat().st_size > 2:
+            return True
+    except OSError:
+        pass
     try:
         from .native_lua_loader import verify_lua_dir
         count = verify_lua_dir(lua_dir)

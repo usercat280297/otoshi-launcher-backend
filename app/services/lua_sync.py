@@ -21,6 +21,12 @@ HF_REPO = os.getenv("HF_LUA_REPO") or os.getenv("HF_REPO_ID", "otoshi/lua-files"
 HF_REVISION = os.getenv("HF_REVISION", "main")
 HUGGINGFACE_TOKEN = os.getenv("HUGGINGFACE_TOKEN", "")
 HF_LUA_ZIP_PATH = os.getenv("HF_LUA_ZIP_PATH", "lua_files/lua_files.zip")
+_LUA_ZIP_ONLY_ENV = os.getenv("LUA_ZIP_ONLY")
+if _LUA_ZIP_ONLY_ENV is None:
+    # Default to extract-once mode (zip-only optional).
+    LUA_ZIP_ONLY = False
+else:
+    LUA_ZIP_ONLY = _LUA_ZIP_ONLY_ENV.lower() in ("1", "true", "yes", "on")
 LUA_CACHE_DIR = Path(os.getenv("APPDATA", ".")) / "otoshi_launcher" / "lua_cache"
 
 HF_CDN_URL = "https://huggingface.co"
@@ -39,6 +45,7 @@ class LuaSyncService:
         """Sync lua files from admin server or Hugging Face if needed"""
         print(f"[LuaSync] Cache dir: {self.cache_dir}")
         print(f"[LuaSync] LUA_REMOTE_ONLY={LUA_REMOTE_ONLY}")
+        print(f"[LuaSync] LUA_ZIP_ONLY={LUA_ZIP_ONLY}")
         if LUA_REMOTE_ONLY:
             return self._sync_admin_only()
         try:
@@ -116,15 +123,20 @@ class LuaSyncService:
                     if chunk:
                         f.write(chunk)
 
-            # Extract
-            with zipfile.ZipFile(zip_path, "r") as z:
-                z.extractall(self.cache_dir)
+            if LUA_ZIP_ONLY:
+                if not self._index_zip_appids(zip_path):
+                    logger.error("Lua bundle downloaded but no lua files indexed")
+                    return False
+            else:
+                # Extract
+                with zipfile.ZipFile(zip_path, "r") as z:
+                    z.extractall(self.cache_dir)
 
-            zip_path.unlink()
+                zip_path.unlink()
 
-            if not self._normalize_lua_cache():
-                logger.error("Lua bundle extracted but no lua files found")
-                return False
+                if not self._normalize_lua_cache():
+                    logger.error("Lua bundle extracted but no lua files found")
+                    return False
 
             # Save version
             (self.cache_dir / "version.txt").write_text(version)
@@ -213,15 +225,20 @@ class LuaSyncService:
                     if chunk:
                         f.write(chunk)
 
-            # Extract
-            with zipfile.ZipFile(zip_path, "r") as z:
-                z.extractall(self.cache_dir)
+            if LUA_ZIP_ONLY:
+                if not self._index_zip_appids(zip_path):
+                    print("[LuaSync] Hugging Face bundle downloaded but no lua files indexed")
+                    return False
+            else:
+                # Extract
+                with zipfile.ZipFile(zip_path, "r") as z:
+                    z.extractall(self.cache_dir)
 
-            zip_path.unlink()
+                zip_path.unlink()
 
-            if not self._normalize_lua_cache():
-                print("[LuaSync] Hugging Face bundle extracted but no lua files found")
-                return False
+                if not self._normalize_lua_cache():
+                    print("[LuaSync] Hugging Face bundle extracted but no lua files found")
+                    return False
 
             # Mark as HF version
             (self.cache_dir / "version.txt").write_text(f"huggingface:{HF_REPO}@{HF_REVISION}")
@@ -305,9 +322,17 @@ class LuaSyncService:
         lua_dir = self.cache_dir / "lua_files"
         if not lua_dir.exists():
             return False
-        if not list(lua_dir.glob("*.lua")):
-            return False
+        if LUA_ZIP_ONLY:
+            if not (lua_dir / "appids.json").exists():
+                return False
+        else:
+            if not list(lua_dir.glob("*.lua")):
+                return False
         if version.startswith(f"huggingface:{HF_REPO}@{HF_REVISION}"):
+            return True
+        # If files are already present but version metadata is missing,
+        # treat as cached to avoid re-sync on every startup.
+        if not version:
             return True
         return False
 
@@ -345,9 +370,13 @@ class LuaSyncService:
         lua_dir = self.cache_dir / "lua_files"
         
         # If cache already has lua files, we're good
-        if lua_dir.exists() and list(lua_dir.glob("*.lua")):
-            logger.info(f"Using cached lua files from: {lua_dir}")
-            return
+        if lua_dir.exists():
+            if list(lua_dir.glob("*.lua")):
+                logger.info(f"Using cached lua files from: {lua_dir}")
+                return
+            if (lua_dir / "appids.json").exists():
+                logger.info(f"Using cached lua index from: {lua_dir}")
+                return
         
         # Copy from bundled location
         bundled = self._get_bundled_lua_dir()
@@ -418,6 +447,39 @@ class LuaSyncService:
             print(f"[LuaSync] Wrote appid index: {index_path} ({len(appids)} items)")
         except Exception as e:
             print(f"[LuaSync] Failed to write appid index: {e}")
+
+    def _index_zip_appids(self, zip_path: Path) -> bool:
+        """Index appids directly from a lua zip without extracting."""
+        try:
+            lua_dir = self.cache_dir / "lua_files"
+            lua_dir.mkdir(parents=True, exist_ok=True)
+            appids = []
+            seen = set()
+            with zipfile.ZipFile(zip_path, "r") as zf:
+                for name in zf.namelist():
+                    if not name.lower().endswith(".lua"):
+                        continue
+                    stem = Path(name).stem.strip()
+                    appid = None
+                    if stem.isdigit():
+                        appid = stem
+                    else:
+                        import re
+                        match = re.search(r"\d{3,}", stem)
+                        if match:
+                            appid = match.group(0)
+                    if appid and appid not in seen:
+                        seen.add(appid)
+                        appids.append(appid)
+            if appids:
+                appids = sorted(appids, key=int)
+            index_path = lua_dir / "appids.json"
+            index_path.write_text(json.dumps(appids), encoding="utf-8")
+            print(f"[LuaSync] Wrote appid index from zip: {index_path} ({len(appids)} items)")
+            return True if appids else False
+        except Exception as e:
+            print(f"[LuaSync] Failed to index lua zip: {e}")
+            return False
 
     def get_lua_dir(self) -> Path:
         """Get lua files directory, ensuring it exists"""
