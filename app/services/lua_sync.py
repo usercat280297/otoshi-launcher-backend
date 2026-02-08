@@ -157,73 +157,33 @@ class LuaSyncService:
             print(f"[LuaSync] HF_LUA_ZIP_PATH={HF_LUA_ZIP_PATH}")
             print(f"[LuaSync] HF token set={bool(HUGGINGFACE_TOKEN)}")
 
-            # Try preferred path first (supports nested lua_files/ folder)
+            # Try preferred paths first (supports nested lua_files/ folder)
             preferred_paths = []
             if HF_LUA_ZIP_PATH:
-                preferred_paths.append(HF_LUA_ZIP_PATH.split("?", 1)[0])
-            preferred_paths.append("lua-files.zip")
-            preferred_paths.append("lua_files.zip")
+                preferred_paths.append(HF_LUA_ZIP_PATH)
+            preferred_paths.extend(["lua-files.zip", "lua_files.zip", "lua.zip"])
 
-            hf_zip_url = ""
             headers = self.hf_headers or {}
-            if HF_LUA_ZIP_PATH and HF_LUA_ZIP_PATH.startswith("http"):
-                candidate = HF_LUA_ZIP_PATH
-                print(f"[LuaSync] Trying lua zip (full url): {candidate}")
-                resp = requests.get(candidate, headers=headers, timeout=30, stream=True)
-                print(f"[LuaSync] Response: {resp.status_code} for {candidate}")
-                if resp.status_code == 200:
-                    hf_zip_url = candidate
-                resp.close()
-            if not hf_zip_url:
-                for path in preferred_paths:
-                    candidate = f"https://huggingface.co/datasets/{HF_REPO}/resolve/{HF_REVISION}/{path}"
-                    print(f"[LuaSync] Trying lua zip: {candidate}")
-                    resp = requests.get(candidate, headers=headers, timeout=30, stream=True)
-                    print(f"[LuaSync] Response: {resp.status_code} for {candidate}")
-                    if resp.status_code == 200:
-                        hf_zip_url = candidate
-                        break
-                    resp.close()
+            zip_path = None
+            for candidate in self._build_hf_candidate_urls(preferred_paths):
+                print(f"[LuaSync] Trying lua zip: {candidate}")
+                zip_path = self._download_hf_zip(candidate, headers)
+                if zip_path:
+                    break
 
-            if not hf_zip_url:
+            if not zip_path:
                 # Fall back to auto-discovery in repo tree
                 discovered_path = self._find_hf_lua_zip(headers)
                 if discovered_path:
-                    hf_zip_url = f"https://huggingface.co/datasets/{HF_REPO}/resolve/{HF_REVISION}/{discovered_path}"
-                    print(f"[LuaSync] Retrying with detected lua zip: {hf_zip_url}")
+                    for candidate in self._build_hf_candidate_urls([discovered_path]):
+                        print(f"[LuaSync] Retrying with detected lua zip: {candidate}")
+                        zip_path = self._download_hf_zip(candidate, headers)
+                        if zip_path:
+                            break
 
-            if not hf_zip_url:
+            if not zip_path:
                 print("[LuaSync] No lua zip found in Hugging Face repo")
                 return False
-
-            resp = requests.get(hf_zip_url, headers=headers, timeout=120, stream=True)
-
-            if resp.status_code == 404:
-                alt_path = self._find_hf_lua_zip(headers)
-                if alt_path:
-                    hf_zip_url = f"https://huggingface.co/datasets/{HF_REPO}/resolve/{HF_REVISION}/{alt_path}"
-                    print(f"[LuaSync] Retrying with detected lua zip: {hf_zip_url}")
-                    resp = requests.get(hf_zip_url, headers=headers, timeout=120, stream=True)
-
-            if resp.status_code in (401, 403) and headers.get("Authorization"):
-                print("[LuaSync] Hugging Face auth failed - retrying without token")
-                resp = requests.get(
-                    hf_zip_url,
-                    headers={},
-                    timeout=120,
-                    stream=True
-                )
-            if resp.status_code in (401, 403):
-                print("[LuaSync] Hugging Face authentication failed")
-                return False
-
-            resp.raise_for_status()
-
-            zip_path = self.cache_dir / "lua_bundle_hf.zip"
-            with open(zip_path, "wb") as f:
-                for chunk in resp.iter_content(chunk_size=8192):
-                    if chunk:
-                        f.write(chunk)
 
             if LUA_ZIP_ONLY:
                 if not self._index_zip_appids(zip_path):
@@ -231,8 +191,12 @@ class LuaSyncService:
                     return False
             else:
                 # Extract
-                with zipfile.ZipFile(zip_path, "r") as z:
-                    z.extractall(self.cache_dir)
+                try:
+                    with zipfile.ZipFile(zip_path, "r") as z:
+                        z.extractall(self.cache_dir)
+                except zipfile.BadZipFile:
+                    print("[LuaSync] Downloaded file is not a valid zip")
+                    return False
 
                 zip_path.unlink()
 
@@ -250,6 +214,72 @@ class LuaSyncService:
         except Exception as e:
             print(f"[LuaSync] Hugging Face sync failed: {e}")
             return False
+
+    def _build_hf_candidate_urls(self, paths: list[str]) -> list[str]:
+        urls: list[str] = []
+        for raw_path in paths:
+            if not raw_path:
+                continue
+            if raw_path.startswith("http"):
+                urls.append(raw_path)
+                if "?" not in raw_path:
+                    urls.append(raw_path + "?download=1")
+                continue
+            if "?" in raw_path:
+                base_path, query = raw_path.split("?", 1)
+            else:
+                base_path, query = raw_path, ""
+            for base in ("resolve", "raw"):
+                base_url = f"https://huggingface.co/datasets/{HF_REPO}/{base}/{HF_REVISION}/{base_path}"
+                if query:
+                    urls.append(f"{base_url}?{query}")
+                else:
+                    urls.append(base_url)
+                    urls.append(f"{base_url}?download=1")
+        # De-duplicate while preserving order
+        seen = set()
+        deduped = []
+        for url in urls:
+            if url in seen:
+                continue
+            seen.add(url)
+            deduped.append(url)
+        return deduped
+
+    def _download_hf_zip(self, url: str, headers: dict) -> Optional[Path]:
+        try:
+            resp = requests.get(url, headers=headers, timeout=120, stream=True)
+            if resp.status_code in (401, 403) and headers.get("Authorization"):
+                print("[LuaSync] Hugging Face auth failed - retrying without token")
+                resp.close()
+                resp = requests.get(url, headers={}, timeout=120, stream=True)
+            if resp.status_code in (401, 403):
+                print("[LuaSync] Hugging Face authentication failed")
+                resp.close()
+                return None
+            if resp.status_code != 200:
+                resp.close()
+                return None
+
+            zip_path = self.cache_dir / "lua_bundle_hf.zip"
+            with open(zip_path, "wb") as f:
+                for chunk in resp.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+            resp.close()
+
+            if not zipfile.is_zipfile(zip_path):
+                print(f"[LuaSync] Downloaded file is not a valid zip: {url}")
+                try:
+                    zip_path.unlink()
+                except OSError:
+                    pass
+                return None
+
+            return zip_path
+        except Exception as e:
+            print(f"[LuaSync] Failed to download lua zip: {e}")
+            return None
 
     def _find_hf_lua_zip(self, headers: dict) -> Optional[str]:
         """Discover a lua zip file in the HF dataset."""
@@ -343,7 +373,12 @@ class LuaSyncService:
         # 1. PyInstaller bundle (_MEIPASS)
         if getattr(sys, 'frozen', False):
             paths_to_check.append(Path(sys._MEIPASS) / "lua_files")
-            paths_to_check.append(Path(sys.executable).parent / "lua_files")
+            exe_dir = Path(sys.executable).parent
+            paths_to_check.append(exe_dir / "lua_files")
+            # Portable layouts: <root>/resources/backend/otoshi-backend.exe
+            # Check resources and root folders for bundled lua_files.
+            paths_to_check.append(exe_dir.parent / "lua_files")
+            paths_to_check.append(exe_dir.parent.parent / "lua_files")
 
         # 2. Development mode
         paths_to_check.append(Path(__file__).resolve().parents[3] / "lua_files")
