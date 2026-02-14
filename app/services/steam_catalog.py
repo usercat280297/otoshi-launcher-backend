@@ -8,6 +8,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Iterable, Optional, Any, Dict, List
 import ctypes
 import os
+import sys
+import zipfile
 
 import requests
 import bleach
@@ -31,7 +33,7 @@ from ..core.config import (
 from ..services.remote_game_data import get_lua_appids_from_server
 
 TAG_RE = re.compile(r"<[^>]+>")
-MEDIA_VERSION = 6
+MEDIA_VERSION = 7
 
 STEAM_HTML_TAGS = [
     "a",
@@ -94,6 +96,10 @@ _NATIVE_MOVIE_BUILDER = None
 
 
 _native_movie_builder: Optional[Any] = None
+_LUA_PACK_LOCK = threading.Lock()
+_LUA_PACK_INDEX_SIGNATURE: Optional[str] = None
+_LUA_PACK_INDEX: Optional[Dict[str, List[str]]] = None
+_LUA_PACK_CLEANED_LEGACY = False
 
 
 def _load_native_movie_builder():
@@ -349,19 +355,35 @@ def _parse_requirements(payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     return {"minimum": minimum, "recommended": recommended}
 
 
+def _steam_fallback_images(appid: str) -> Dict[str, str]:
+    base = f"https://cdn.cloudflare.steamstatic.com/steam/apps/{appid}"
+    return {
+        "header_image": f"{base}/header.jpg",
+        "capsule_image": f"{base}/capsule_616x353.jpg",
+        "background": f"{base}/library_hero.jpg",
+    }
+
+
 def _summary_from_payload(appid: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    dlc_raw = payload.get("dlc") or []
+    dlc_count = len(dlc_raw) if isinstance(dlc_raw, list) else 0
+    fallback = _steam_fallback_images(appid)
+    header_image = payload.get("header_image") or fallback["header_image"]
+    capsule_image = payload.get("capsule_image") or payload.get("capsule_imagev5") or fallback["capsule_image"]
+    background = payload.get("background") or payload.get("background_raw") or capsule_image or header_image or fallback["background"]
     return {
         "app_id": str(appid),
         "name": payload.get("name") or str(appid),
         "short_description": _strip_html(payload.get("short_description")),
-        "header_image": payload.get("header_image"),
-        "capsule_image": payload.get("capsule_image") or payload.get("capsule_imagev5"),
-        "background": payload.get("background"),
+        "header_image": header_image,
+        "capsule_image": capsule_image,
+        "background": background,
         "price": _parse_price(payload),
         "genres": _parse_genres(payload),
         "release_date": (payload.get("release_date") or {}).get("date"),
         "platforms": _parse_platforms(payload),
         "required_age": _parse_required_age(payload),
+        "dlc_count": dlc_count,
         "denuvo": str(appid) in DENUVO_APP_ID_SET,
     }
 
@@ -390,11 +412,13 @@ def _detail_from_payload(appid: str, payload: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _lua_dir() -> Path:
+    _cleanup_legacy_lua_extract()
+
     # First check if lua sync service has cached files
     try:
         from .lua_sync import get_lua_files_dir
         synced_dir = get_lua_files_dir()
-        if synced_dir.exists():
+        if synced_dir.exists() and _has_lua_files(synced_dir):
             return synced_dir
     except (ImportError, ValueError):
         pass
@@ -402,7 +426,6 @@ def _lua_dir() -> Path:
     if LUA_FILES_DIR:
         return Path(LUA_FILES_DIR)
     # PyInstaller bundled: look in _MEIPASS or next to exe
-    import sys
     if getattr(sys, 'frozen', False):
         # Running as PyInstaller bundle
         base_path = Path(getattr(sys, '_MEIPASS', sys.base_prefix))
@@ -415,6 +438,188 @@ def _lua_dir() -> Path:
         if lua_path.exists():
             return lua_path
     return Path(__file__).resolve().parents[3] / "lua_files"
+
+
+def _lua_cache_root() -> Path:
+    cache_env = os.getenv("OTOSHI_CACHE_DIR", "").strip()
+    if cache_env:
+        return Path(cache_env)
+    appdata = os.getenv("APPDATA", "").strip()
+    if appdata:
+        return Path(appdata) / "otoshi_launcher"
+    return Path.cwd() / ".otoshi_cache"
+
+
+def _resolve_lua_pack_path() -> Optional[Path]:
+    env_path = os.getenv("LUA_PACK_PATH", "").strip()
+    if env_path:
+        candidate = Path(env_path)
+        if candidate.exists():
+            return candidate
+
+    candidates: list[Path] = []
+    exe_dir = Path(sys.executable).parent if getattr(sys, "frozen", False) else None
+
+    if exe_dir:
+        candidates.extend(
+            [
+                exe_dir / "lua.pack",
+                exe_dir / "resources" / "backend" / "lua.pack",
+                exe_dir / "backend" / "lua.pack",
+            ]
+        )
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        candidates.extend(
+            [
+                Path(meipass) / "lua.pack",
+                Path(meipass) / "backend" / "lua.pack",
+            ]
+        )
+    candidates.extend(
+        [
+            Path("lua.pack"),
+            Path("resources") / "backend" / "lua.pack",
+            Path("backend") / "lua.pack",
+        ]
+    )
+
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def _extract_appid_from_name(name: str) -> Optional[str]:
+    stem = Path(name).stem.strip()
+    if stem.isdigit():
+        return stem
+    match = re.search(r"\d{3,}", stem)
+    return match.group(0) if match else None
+
+
+def _cleanup_legacy_lua_extract() -> None:
+    global _LUA_PACK_CLEANED_LEGACY
+    if _LUA_PACK_CLEANED_LEGACY:
+        return
+    _LUA_PACK_CLEANED_LEGACY = True
+
+    cache_root = _lua_cache_root() / "lua_pack_cache"
+    extract_root = cache_root / "extracted"
+    marker_path = cache_root / ".source"
+
+    try:
+        if extract_root.exists():
+            import shutil
+
+            shutil.rmtree(extract_root, ignore_errors=True)
+    except OSError:
+        pass
+
+    try:
+        if marker_path.exists():
+            marker_path.unlink()
+    except OSError:
+        pass
+
+
+def _read_index_from_pack(archive: zipfile.ZipFile) -> List[str]:
+    for candidate in ("appids.json", "lua_files/appids.json"):
+        try:
+            with archive.open(candidate, "r") as handle:
+                import json
+
+                raw = json.loads(handle.read().decode("utf-8", errors="ignore"))
+        except KeyError:
+            continue
+        except Exception:
+            return []
+        if isinstance(raw, list):
+            return [str(item) for item in raw if str(item).isdigit()]
+    return []
+
+
+def _read_lua_pack_index() -> Optional[Dict[str, List[str]]]:
+    global _LUA_PACK_INDEX_SIGNATURE, _LUA_PACK_INDEX
+
+    _cleanup_legacy_lua_extract()
+    pack_path = _resolve_lua_pack_path()
+    if not pack_path:
+        return None
+
+    try:
+        signature = f"{pack_path.resolve()}|{pack_path.stat().st_size}|{int(pack_path.stat().st_mtime)}"
+    except OSError:
+        return None
+
+    with _LUA_PACK_LOCK:
+        if _LUA_PACK_INDEX_SIGNATURE == signature and _LUA_PACK_INDEX is not None:
+            return _LUA_PACK_INDEX
+
+        try:
+            with zipfile.ZipFile(pack_path, "r") as archive:
+                indexed = _read_index_from_pack(archive)
+                appids: List[str] = []
+                seen: set[str] = set()
+                workshop_appids: List[str] = []
+                workshop_seen: set[str] = set()
+
+                for member in archive.infolist():
+                    if member.is_dir():
+                        continue
+                    name = member.filename.replace("\\", "/")
+                    if not name.lower().endswith(".lua"):
+                        continue
+                    appid = _extract_appid_from_name(Path(name).name)
+                    if appid and appid not in seen:
+                        seen.add(appid)
+                        appids.append(appid)
+
+                    if not appid or appid in workshop_seen:
+                        continue
+
+                    try:
+                        with archive.open(member, "r") as handle:
+                            for _ in range(20):
+                                line = handle.readline()
+                                if not line:
+                                    break
+                                if b"supports steam workshop content" in line.lower():
+                                    workshop_seen.add(appid)
+                                    workshop_appids.append(appid)
+                                    break
+                    except OSError:
+                        continue
+
+                if indexed:
+                    ordered = []
+                    used = set()
+                    for appid in indexed:
+                        if appid not in used:
+                            used.add(appid)
+                            ordered.append(appid)
+                    for appid in appids:
+                        if appid not in used:
+                            used.add(appid)
+                            ordered.append(appid)
+                    appids = ordered
+                elif appids:
+                    appids = sorted(appids, key=int)
+
+                if workshop_appids:
+                    workshop_appids = sorted(workshop_appids, key=int)
+
+                result = {
+                    "appids": prioritize_appids(appids),
+                    "workshop_appids": prioritize_appids(workshop_appids),
+                }
+                _LUA_PACK_INDEX_SIGNATURE = signature
+                _LUA_PACK_INDEX = result
+                return result
+        except (OSError, zipfile.BadZipFile):
+            _LUA_PACK_INDEX_SIGNATURE = signature
+            _LUA_PACK_INDEX = {"appids": [], "workshop_appids": []}
+            return _LUA_PACK_INDEX
 
 
 def _has_lua_files(lua_dir: Path) -> bool:
@@ -475,7 +680,11 @@ def get_lua_appids() -> List[str]:
         if lua_dir.exists() and _has_lua_files(lua_dir):
             cached = None
         else:
-            return cached
+            pack_index = _read_lua_pack_index()
+            if pack_index and pack_index.get("appids"):
+                cached = None
+            else:
+                return cached
 
     if LUA_REMOTE_ONLY:
         appids = get_lua_appids_from_server()
@@ -489,6 +698,11 @@ def get_lua_appids() -> List[str]:
         _attempt_lua_sync()
         lua_dir = _lua_dir()
     if not lua_dir.exists() or not _has_lua_files(lua_dir):
+        pack_index = _read_lua_pack_index()
+        if pack_index and pack_index.get("appids"):
+            appids = pack_index.get("appids", [])
+            cache_client.set_json(cache_key, appids, ttl=STEAM_CATALOG_CACHE_TTL_SECONDS)
+            return appids
         return []
 
     # Fast path: use cached appid index if available
@@ -506,14 +720,7 @@ def get_lua_appids() -> List[str]:
             pass
     
     for item in lua_dir.glob("*.lua"):
-        stem = item.stem.strip()
-        appid = None
-        if stem.isdigit():
-            appid = stem
-        else:
-            match = re.search(r"\d{3,}", stem)
-            if match:
-                appid = match.group(0)
+        appid = _extract_appid_from_name(item.name)
         if appid and appid not in seen:
             seen.add(appid)
             appids.append(appid)
@@ -551,7 +758,11 @@ def get_lua_workshop_appids() -> List[str]:
         if lua_dir.exists() and _has_lua_files(lua_dir):
             cached = None
         else:
-            return cached
+            pack_index = _read_lua_pack_index()
+            if pack_index and (pack_index.get("workshop_appids") or pack_index.get("appids")):
+                cached = None
+            else:
+                return cached
 
     if LUA_REMOTE_ONLY:
         # Remote source does not expose workshop markers, fall back to all appids.
@@ -566,19 +777,18 @@ def get_lua_workshop_appids() -> List[str]:
         _attempt_lua_sync()
         lua_dir = _lua_dir()
     if not lua_dir.exists() or not _has_lua_files(lua_dir):
+        pack_index = _read_lua_pack_index()
+        if pack_index:
+            workshop = pack_index.get("workshop_appids") or []
+            if workshop:
+                cache_client.set_json(cache_key, workshop, ttl=STEAM_CATALOG_CACHE_TTL_SECONDS)
+                return workshop
         return get_lua_appids()
 
     for item in lua_dir.glob("*.lua"):
         if not _lua_file_has_workshop_marker(item):
             continue
-        stem = item.stem.strip()
-        appid = None
-        if stem.isdigit():
-            appid = stem
-        else:
-            match = re.search(r"\d{3,}", stem)
-            if match:
-                appid = match.group(0)
+        appid = _extract_appid_from_name(item.name)
         if appid and appid not in seen:
             seen.add(appid)
             appids.append(appid)
@@ -644,6 +854,13 @@ def get_catalog_page(appids: List[str]) -> List[Dict[str, Any]]:
         for i in range(0, len(missing), batch_size):
             batch = missing[i : i + batch_size]
             payload = _store_appdetails(batch, filters="basic,price_overview,platforms,genres,release_date")
+            if not payload and len(batch) > 1:
+                # Steam store API may reject multi-appid requests (returns 400/null).
+                # Fall back to per-appid requests to keep catalog usable.
+                for appid in batch:
+                    single = _store_appdetails([appid], filters="basic,price_overview,platforms,genres,release_date")
+                    if single:
+                        payload.update(single)
             for appid in batch:
                 entry = payload.get(str(appid), {}) if isinstance(payload, dict) else {}
                 if not entry or not entry.get("success"):

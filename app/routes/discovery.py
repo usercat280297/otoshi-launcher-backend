@@ -1,15 +1,27 @@
 from typing import List
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from ..core.cache import cache_client
 from ..db import get_db
 from ..models import Game, User
-from ..schemas import GameOut
+from ..schemas import (
+    AnimeDetailOut,
+    AnimeEpisodeSourceOut,
+    AnimeHomeOut,
+    AnimeItemOut,
+    GameOut,
+)
 from ..core.config import DISCOVERY_FORCE_STEAM
 from ..services.recommendations import recommend_games, similar_games
 from ..services.steam_catalog import get_catalog_page, get_lua_appids
+from ..services.anime_catalog import (
+    get_anime_detail,
+    get_episode_sources,
+    get_home_sections,
+    search_home_catalog,
+)
 from .deps import get_current_user
 
 router = APIRouter()
@@ -49,6 +61,52 @@ def refresh_discovery_queue(
         steam_items = get_catalog_page(appids[:12]) if appids else []
         payload = [_steam_summary_to_game(item) for item in steam_items]
     return payload
+
+
+@router.get("/anime/home", response_model=AnimeHomeOut)
+def anime_home(
+    limit_per_section: int = Query(12, ge=1, le=24),
+    refresh: bool = Query(False),
+):
+    try:
+        return get_home_sections(limit_per_section=limit_per_section, refresh=refresh)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to fetch anime catalog: {exc}") from exc
+
+
+@router.get("/anime/search", response_model=List[AnimeItemOut])
+def anime_search(
+    q: str = Query(..., min_length=1),
+    limit: int = Query(18, ge=1, le=50),
+    refresh: bool = Query(False),
+):
+    try:
+        return search_home_catalog(q, limit=limit, refresh=refresh)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to search anime catalog: {exc}") from exc
+
+
+@router.get("/anime/detail", response_model=AnimeDetailOut)
+def anime_detail(
+    url: str = Query(..., min_length=5),
+    episode_limit: int = Query(40, ge=1, le=100),
+):
+    try:
+        return get_anime_detail(url, episode_limit=episode_limit)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to fetch anime detail: {exc}") from exc
+
+
+@router.get("/anime/episode", response_model=AnimeEpisodeSourceOut)
+def anime_episode(url: str = Query(..., min_length=5)):
+    try:
+        return get_episode_sources(url)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to fetch anime episode sources: {exc}") from exc
 
 
 def _steam_summary_to_game(item: dict) -> dict:

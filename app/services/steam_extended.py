@@ -58,41 +58,131 @@ def _resolve_dlc_image(dlc_info: dict, dlc_id: str) -> Optional[str]:
 
 
 def _fetch_store_meta(app_id: str) -> dict:
+    """Fetch DLC metadata with multi-region fallback for geo-blocked content"""
     cache_key = f"steam:dlc:meta:{app_id}"
     cached = cache_client.get_json(cache_key)
     if cached is not None:
         return cached
 
-    url = f"https://store.steampowered.com/app/{app_id}/?l=en"
-    try:
-        response = requests.get(
-            url,
-            timeout=STEAM_REQUEST_TIMEOUT_SECONDS,
-            headers={"User-Agent": "otoshi-launcher/1.0"},
-        )
-    except requests.RequestException:
-        cache_client.set_json(cache_key, {}, ttl=STEAM_CACHE_TTL_SECONDS)
+    import time
+    start_time = time.time()
+    max_time_budget = 5  # Maximum 5 seconds to try all regions
+
+    # Multi-region fallback: try different regions if US is blocked
+    regions = [
+        ("en", "US"),      # Primary: English (US)
+        ("en", "GB"),      # Fallback: English (UK)  
+        ("en", "AU"),      # Fallback: English (Australia)
+        ("en", "CA"),      # Fallback: English (Canada)
+        ("de", "DE"),      # German
+        ("fr", "FR"),      # French
+        ("es", "ES"),      # Spanish
+        ("it", "IT"),      # Italian
+        ("pt", "BR"),      # Portuguese (Brazil)
+        ("ru", "RU"),      # Russian
+        ("ja", "JP"),      # Japanese
+        ("zh", "CN"),      # Chinese (Simplified)
+    ]
+
+    meta = {}
+    saw_response = False
+    last_region = None
+    last_lang = None
+    
+    for lang, region_code in regions:
+        # Exit early if we've exceeded time budget
+        if time.time() - start_time > max_time_budget:
+            logger.debug(f"DLC {app_id}: Time budget exceeded, returning {len(meta)} items found")
+            break
+
+        try:
+            # Build URL with language parameter
+            url = f"https://store.steampowered.com/app/{app_id}/?l={lang}&cc={region_code}"
+            
+            response = requests.get(
+                url,
+                timeout=STEAM_REQUEST_TIMEOUT_SECONDS,
+                headers={"User-Agent": "otoshi-launcher/1.0"},
+            )
+            
+            # Skip if geo-blocked or not available
+            if response.status_code not in (200, 206):
+                logger.debug(f"DLC {app_id}: Region {region_code} ({lang}) returned {response.status_code}")
+                continue
+
+            saw_response = True
+            last_region = region_code
+            last_lang = lang
+
+            soup = BeautifulSoup(response.text, "html.parser")
+            
+            def _meta(prop: str) -> Optional[str]:
+                tag = soup.find("meta", attrs={"property": prop})
+                if tag and tag.get("content"):
+                    return tag.get("content")
+                tag = soup.find("meta", attrs={"name": prop})
+                if tag and tag.get("content"):
+                    return tag.get("content")
+                return None
+
+            image = _meta("og:image") or _meta("twitter:image")
+            title = _meta("og:title")
+            description = _meta("og:description")
+            
+            # Ensure we have meaningful data
+            if image and title and description:
+                meta = {
+                    "image": image,
+                    "title": title,
+                    "description": description,
+                    "region": region_code,
+                    "language": lang,
+                }
+                logger.info(f"DLC {app_id}: Successfully fetched from {region_code}/{lang}")
+                cache_client.set_json(cache_key, meta, ttl=STEAM_CACHE_TTL_SECONDS)
+                return meta
+            elif image or title:  # Partial data
+                meta = {
+                    "image": image,
+                    "title": title,
+                    "description": description,
+                    "region": region_code,
+                    "language": lang,
+                }
+                logger.info(f"DLC {app_id}: Partial data from {region_code}/{lang}")
+                # Continue trying other regions for complete data
+                
+        except requests.RequestException as e:
+            logger.debug(f"DLC {app_id}: Request failed for {region_code}/{lang}: {e}")
+            continue
+        except Exception as e:
+            logger.error(f"DLC {app_id}: Parse error for {region_code}/{lang}: {e}")
+            continue
+    
+    # If no metadata found, cache empty result with short TTL
+    if not meta and saw_response:
+        meta = {
+            "image": f"https://cdn.cloudflare.steamstatic.com/steam/apps/{app_id}/header.jpg",
+            "title": f"DLC {app_id}",
+            "description": "Additional content for this game.",
+            "region": last_region,
+            "language": last_lang,
+        }
+
+    if meta:
+        if not meta.get("image"):
+            meta["image"] = f"https://cdn.cloudflare.steamstatic.com/steam/apps/{app_id}/header.jpg"
+        if not meta.get("title"):
+            meta["title"] = f"DLC {app_id}"
+        if not meta.get("description"):
+            meta["description"] = "Additional content for this game."
+
+    # If no metadata found, cache empty result with short TTL
+    if not meta:
+        logger.warning(f"DLC {app_id}: Failed to fetch metadata from all regions")
+        cache_client.set_json(cache_key, {}, ttl=60)  # Short TTL for retrying
         return {}
-
-    if response.status_code != 200:
-        cache_client.set_json(cache_key, {}, ttl=STEAM_CACHE_TTL_SECONDS)
-        return {}
-
-    soup = BeautifulSoup(response.text, "html.parser")
-    def _meta(prop: str) -> Optional[str]:
-        tag = soup.find("meta", attrs={"property": prop})
-        if tag and tag.get("content"):
-            return tag.get("content")
-        tag = soup.find("meta", attrs={"name": prop})
-        if tag and tag.get("content"):
-            return tag.get("content")
-        return None
-
-    meta = {
-        "image": _meta("og:image") or _meta("twitter:image"),
-        "title": _meta("og:title"),
-        "description": _meta("og:description"),
-    }
+    
     cache_client.set_json(cache_key, meta, ttl=STEAM_CACHE_TTL_SECONDS)
     return meta
 
@@ -159,13 +249,18 @@ def get_steam_dlc(app_id: str) -> List[dict]:
     """
     cache_key = f"steam:dlc:{app_id}"
     cached = cache_client.get_json(cache_key)
-    if cached is not None:
+    if cached is not None and isinstance(cached, list):
+        # Only use cache if it contains items with required fields - don't use empty list cache
         def _has_required_fields(item: dict) -> bool:
             if not isinstance(item, dict):
                 return False
             return bool(item.get("header_image")) and bool(item.get("description") or item.get("short_description"))
-        if all(_has_required_fields(item) for item in cached):
+        if len(cached) > 0 and all(_has_required_fields(item) for item in cached):
+            # Only return if we have valid items
             return cached
+        elif len(cached) == 0:
+            # Empty cache might be stale - try to fetch fresh data
+            pass
 
     url = f"{STEAM_STORE_API_URL.rstrip('/')}/appdetails"
     params = {

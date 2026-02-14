@@ -5,12 +5,16 @@ from typing import Dict, Optional
 from urllib.parse import quote, unquote
 
 import requests
+import time
 
 from ..core.config import (
+    HF_CONNECT_TIMEOUT_SECONDS,
+    HF_MAX_RETRIES,
     HF_CHUNK_MODE,
     HF_CHUNK_PATH_TEMPLATE,
     HF_REPO_ID,
     HF_REPO_TYPE,
+    HF_RETRY_BACKOFF_SECONDS,
     HF_REVISION,
     HF_STORAGE_BASE_PATH,
     HF_TIMEOUT_SECONDS,
@@ -74,24 +78,46 @@ class HuggingFaceChunkFetcher:
             raise HuggingFaceChunkError("HF_CHUNK_PATH_TEMPLATE not configured")
         return _normalize_path(_apply_template(HF_CHUNK_PATH_TEMPLATE, mapping))
 
+    def _request_once(
+        self,
+        url: str,
+        headers: Dict[str, str],
+    ) -> requests.Response:
+        max_retries = max(1, HF_MAX_RETRIES)
+        connect_timeout = max(1, HF_CONNECT_TIMEOUT_SECONDS)
+        read_timeout = max(1, HF_TIMEOUT_SECONDS)
+        timeout = (connect_timeout, read_timeout)
+        last_exc: Optional[Exception] = None
+
+        for attempt in range(1, max_retries + 1):
+            try:
+                return requests.get(
+                    url,
+                    headers=headers,
+                    stream=True,
+                    timeout=timeout,
+                )
+            except requests.RequestException as exc:
+                last_exc = exc
+                if attempt < max_retries:
+                    backoff = max(0.0, HF_RETRY_BACKOFF_SECONDS) * attempt
+                    if backoff > 0:
+                        time.sleep(backoff)
+                    continue
+                break
+
+        raise HuggingFaceChunkError(
+            f"Hugging Face request failed after {max_retries} attempts: {last_exc}"
+        )
+
     def _request(self, path: str, range_header: Optional[str] = None) -> Optional[requests.Response]:
         safe_path = _encode_path(path)
         url = f"{self._base_url().rstrip('/')}/{safe_path}"
         headers = self._headers(range_header)
-        response = requests.get(
-            url,
-            headers=headers,
-            stream=True,
-            timeout=HF_TIMEOUT_SECONDS,
-        )
+        response = self._request_once(url, headers)
         if response.status_code in (401, 403) and headers.get("Authorization"):
             response.close()
-            response = requests.get(
-                url,
-                headers=self._headers(range_header, use_auth=False),
-                stream=True,
-                timeout=HF_TIMEOUT_SECONDS,
-            )
+            response = self._request_once(url, self._headers(range_header, use_auth=False))
         if response.status_code in (200, 206):
             return response
         if response.status_code == 404:

@@ -18,8 +18,11 @@ from ..models import (
     User,
     UserProfile,
 )
+from ..websocket import manager
 from ..schemas import (
     ActivityEventOut,
+    CommunityCommentIn,
+    CommunityCommentOut,
     ReviewIn,
     ReviewOut,
     ScreenshotOut,
@@ -36,6 +39,36 @@ def _emit_activity(db: Session, user_id: str, event_type: str, payload: dict) ->
     db.add(ActivityEvent(user_id=user_id, event_type=event_type, payload=payload))
 
 
+def _serialize_profile(user: User, profile: UserProfile) -> dict:
+    return {
+        "user_id": profile.user_id,
+        "nickname": user.display_name,
+        "avatar_url": user.avatar_url,
+        "headline": profile.headline,
+        "bio": profile.bio,
+        "location": profile.location,
+        "background_image": profile.background_image,
+        "social_links": profile.social_links or {},
+        "created_at": profile.created_at,
+        "updated_at": profile.updated_at,
+    }
+
+
+def _serialize_comment(event: ActivityEvent, user: Optional[User]) -> dict:
+    payload = event.payload or {}
+    return {
+        "id": event.id,
+        "user_id": event.user_id,
+        "username": user.username if user else "unknown",
+        "display_name": user.display_name if user else None,
+        "avatar_url": user.avatar_url if user else None,
+        "message": str(payload.get("message") or ""),
+        "app_id": payload.get("app_id"),
+        "app_name": payload.get("app_name"),
+        "created_at": event.created_at,
+    }
+
+
 @router.get("/profile/{user_id}")
 def get_profile(user_id: str, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.id == user_id).first()
@@ -44,7 +77,7 @@ def get_profile(user_id: str, db: Session = Depends(get_db)):
     profile = db.query(UserProfile).filter(UserProfile.user_id == user_id).first()
     return {
         "user": UserPublicOut.model_validate(user).model_dump(),
-        "profile": UserProfileOut.model_validate(profile).model_dump() if profile else None,
+        "profile": _serialize_profile(user, profile) if profile else None,
     }
 
 
@@ -56,7 +89,7 @@ def get_my_profile(
     profile = db.query(UserProfile).filter(UserProfile.user_id == current_user.id).first()
     return {
         "user": UserPublicOut.model_validate(current_user).model_dump(),
-        "profile": UserProfileOut.model_validate(profile).model_dump() if profile else None,
+        "profile": _serialize_profile(current_user, profile) if profile else None,
     }
 
 
@@ -77,12 +110,78 @@ def update_profile(
         profile.bio = payload.bio
     if payload.location is not None:
         profile.location = payload.location
+    if payload.background_image is not None:
+        profile.background_image = payload.background_image
     if payload.social_links is not None:
         profile.social_links = payload.social_links
+    if payload.nickname is not None:
+        current_user.display_name = payload.nickname
+    if payload.avatar_url is not None:
+        current_user.avatar_url = payload.avatar_url
 
     db.commit()
     db.refresh(profile)
-    return profile
+    db.refresh(current_user)
+    return _serialize_profile(current_user, profile)
+
+
+@router.get("/comments", response_model=List[CommunityCommentOut])
+def list_community_comments(
+    limit: int = 100,
+    app_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    normalized_limit = min(max(limit, 1), 300)
+    query = (
+        db.query(ActivityEvent)
+        .filter(ActivityEvent.event_type == "community_comment")
+        .order_by(ActivityEvent.created_at.desc())
+        .limit(normalized_limit)
+    )
+    events = query.all()
+
+    if app_id:
+        filtered = []
+        for event in events:
+            payload = event.payload or {}
+            if payload.get("app_id") in (None, "", app_id):
+                filtered.append(event)
+        events = filtered
+
+    user_ids = {event.user_id for event in events}
+    users = db.query(User).filter(User.id.in_(user_ids)).all() if user_ids else []
+    user_map = {user.id: user for user in users}
+
+    # Return oldest -> newest so UI can append naturally.
+    return [_serialize_comment(event, user_map.get(event.user_id)) for event in reversed(events)]
+
+
+@router.post("/comments", response_model=CommunityCommentOut)
+async def publish_community_comment(
+    payload: CommunityCommentIn,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    message = payload.message.strip()
+    if not message:
+        raise HTTPException(status_code=400, detail="Comment is empty")
+
+    event = ActivityEvent(
+        user_id=current_user.id,
+        event_type="community_comment",
+        payload={
+            "message": message,
+            "app_id": payload.app_id,
+            "app_name": payload.app_name,
+        },
+    )
+    db.add(event)
+    db.commit()
+    db.refresh(event)
+
+    comment = _serialize_comment(event, current_user)
+    await manager.broadcast({"type": "community_comment", "payload": comment})
+    return comment
 
 
 @router.get("/reviews/{game_id}", response_model=List[ReviewOut])

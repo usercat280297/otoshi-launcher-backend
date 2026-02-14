@@ -1,4 +1,5 @@
 import base64
+import os
 import secrets
 import traceback
 from datetime import datetime
@@ -69,7 +70,10 @@ OAUTH_PROVIDER_LABELS = {
     "google": "Google",
     "discord": "Discord",
 }
-_OAUTH_LOG_PATH = Path(__file__).resolve().parents[2] / "storage" / "oauth_errors.log"
+_STORAGE_ROOT = Path(
+    os.getenv("OTOSHI_STORAGE_DIR", Path(__file__).resolve().parents[2] / "storage")
+)
+_OAUTH_LOG_PATH = _STORAGE_ROOT / "oauth_errors.log"
 
 
 def _append_query(url: str, params: dict[str, str]) -> str:

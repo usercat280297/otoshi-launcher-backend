@@ -13,7 +13,9 @@ from ..services.steam_catalog import (
     get_catalog_page,
     get_lua_appids,
     get_steam_detail,
+    get_steam_summary,
 )
+from ..services.download_options import build_download_options
 from ..services.steam_search import get_popular_catalog, search_catalog
 from ..services.steam_extended import (
     get_steam_dlc,
@@ -23,9 +25,96 @@ from ..services.steam_extended import (
 )
 from ..services.steam_news_enhanced import fetch_news_enhanced
 from ..core.config import STEAM_NEWS_MAX_COUNT
+from ..core.cache import cache_client
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+def _build_fallback_detail_from_summary(app_id: str) -> Optional[dict]:
+    summary = get_steam_summary(app_id)
+    if not summary:
+        page = get_catalog_page([app_id])
+        if page:
+            summary = page[0]
+    if not summary:
+        return None
+
+    header_image = summary.get("header_image")
+    capsule_image = summary.get("capsule_image")
+    background = summary.get("background") or capsule_image or header_image
+
+    return {
+        "app_id": str(summary.get("app_id") or app_id),
+        "name": summary.get("name") or f"Steam App {app_id}",
+        "short_description": summary.get("short_description"),
+        "header_image": header_image,
+        "capsule_image": capsule_image,
+        "background": background,
+        "required_age": summary.get("required_age"),
+        "price": summary.get("price"),
+        "genres": summary.get("genres"),
+        "release_date": summary.get("release_date"),
+        "platforms": summary.get("platforms"),
+        "denuvo": summary.get("denuvo"),
+        "about_the_game": summary.get("short_description"),
+        "about_the_game_html": None,
+        "detailed_description": summary.get("short_description"),
+        "detailed_description_html": None,
+        "developers": None,
+        "publishers": None,
+        "categories": None,
+        "screenshots": [value for value in [header_image, background] if value],
+        "movies": [],
+        "pc_requirements": None,
+        "metacritic": None,
+        "recommendations": None,
+        "website": None,
+        "support_info": None,
+    }
+
+
+def _build_fallback_detail_from_download_options(app_id: str) -> Optional[dict]:
+    options = build_download_options(app_id)
+    if not options:
+        return None
+
+    name = options.get("name") or f"Steam App {app_id}"
+    size_label = options.get("size_label")
+    short_description = (
+        f"Chunk manifest available ({size_label})."
+        if size_label
+        else "Chunk manifest available."
+    )
+
+    return {
+        "app_id": str(app_id),
+        "name": name,
+        "short_description": short_description,
+        "header_image": None,
+        "capsule_image": None,
+        "background": None,
+        "required_age": None,
+        "price": None,
+        "genres": [],
+        "release_date": None,
+        "platforms": ["windows"],
+        "denuvo": False,
+        "about_the_game": short_description,
+        "about_the_game_html": None,
+        "detailed_description": short_description,
+        "detailed_description_html": None,
+        "developers": None,
+        "publishers": None,
+        "categories": None,
+        "screenshots": [],
+        "movies": [],
+        "pc_requirements": None,
+        "metacritic": None,
+        "recommendations": None,
+        "website": None,
+        "support_info": None,
+    }
 
 
 @router.get("/catalog", response_model=SteamCatalogOut)
@@ -90,6 +179,10 @@ def popular(limit: int = Query(12, ge=1, le=100), offset: int = Query(0, ge=0)):
 @router.get("/games/{app_id}", response_model=SteamGameDetailOut)
 def game_detail(app_id: str):
     detail = get_steam_detail(app_id)
+    if not detail:
+        detail = _build_fallback_detail_from_summary(app_id)
+    if not detail:
+        detail = _build_fallback_detail_from_download_options(app_id)
     if not detail:
         raise HTTPException(status_code=404, detail="Steam app not found")
     return detail
@@ -241,3 +334,28 @@ def game_extended(
     cache_client.set_json(cache_key, response, ttl=300)
     
     return response
+
+
+@router.post("/games/{app_id}/cache/clear")
+def clear_game_cache(app_id: str):
+    prefixes = [
+        f"steam:summary:{app_id}",
+        f"steam:detail:{app_id}",
+        f"steam:dlc:{app_id}",
+        f"steam:achievements:{app_id}",
+        f"steam:news:v7:{app_id}:",
+        f"steam:game:extended:v3:{app_id}:",
+    ]
+    exact_keys = [
+        f"steam:players:{app_id}",
+        f"steam:reviews:{app_id}",
+    ]
+
+    cleared = 0
+    for key in exact_keys:
+        cache_client.delete(key)
+        cleared += 1
+    for prefix in prefixes:
+        cleared += cache_client.delete_prefix(prefix)
+
+    return {"app_id": app_id, "cleared": cleared}

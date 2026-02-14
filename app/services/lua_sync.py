@@ -23,11 +23,15 @@ HUGGINGFACE_TOKEN = os.getenv("HUGGINGFACE_TOKEN", "")
 HF_LUA_ZIP_PATH = os.getenv("HF_LUA_ZIP_PATH", "lua_files/lua_files.zip")
 _LUA_ZIP_ONLY_ENV = os.getenv("LUA_ZIP_ONLY")
 if _LUA_ZIP_ONLY_ENV is None:
-    # Default to extract-once mode (zip-only optional).
-    LUA_ZIP_ONLY = False
+    # Default to zip-index mode to avoid exposing raw lua files in cache.
+    LUA_ZIP_ONLY = True
 else:
     LUA_ZIP_ONLY = _LUA_ZIP_ONLY_ENV.lower() in ("1", "true", "yes", "on")
-LUA_CACHE_DIR = Path(os.getenv("APPDATA", ".")) / "otoshi_launcher" / "lua_cache"
+_CACHE_BASE = os.getenv("OTOSHI_CACHE_DIR") or os.getenv("LUA_CACHE_DIR")
+if _CACHE_BASE:
+    LUA_CACHE_DIR = Path(_CACHE_BASE) / "lua_cache"
+else:
+    LUA_CACHE_DIR = Path(os.getenv("APPDATA", ".")) / "otoshi_launcher" / "lua_cache"
 
 HF_CDN_URL = "https://huggingface.co"
 HF_DATASET_API = f"https://huggingface.co/api/datasets/{HF_REPO}"

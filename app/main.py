@@ -1,4 +1,6 @@
 from pathlib import Path
+import os
+import sys
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
@@ -56,6 +58,13 @@ from .routes import (
     launcher_download,
     updates,
     lua_admin,
+    graphics,
+    launcher_diagnostics,
+    manifests_v2,
+    downloads_v2,
+    self_heal_v2,
+    updates_v2,
+    cdn_v2,
 )
 from .websocket import manager
 from fastapi import WebSocket, WebSocketDisconnect, status, Request, HTTPException
@@ -118,6 +127,15 @@ def _start_lua_sync() -> None:
         print(f"Lua sync error: {e} (launcher will continue)")
 
 
+def _should_seed_sample_games() -> bool:
+    """Seed demo/sample games only when explicitly enabled in packaged builds."""
+    raw = os.getenv("SEED_SAMPLE_GAMES")
+    if raw is not None:
+        return raw.strip().lower() in ("1", "true", "yes", "on")
+    # Keep old behavior for local development, disable by default for frozen/packaged app.
+    return not getattr(sys, "frozen", False)
+
+
 @app.on_event("startup")
 def on_startup() -> None:
     Base.metadata.create_all(bind=engine)
@@ -128,11 +146,12 @@ def on_startup() -> None:
     # Sync lua files in background to avoid blocking startup/port scan
     threading.Thread(target=_start_lua_sync, daemon=True).start()
 
-    db = SessionLocal()
-    try:
-        seed_games(db)
-    finally:
-        db.close()
+    if _should_seed_sample_games():
+        db = SessionLocal()
+        try:
+            seed_games(db)
+        finally:
+            db.close()
 
     if STEAMGRIDDB_PREWARM_ENABLED:
         appids = get_lua_appids()
@@ -158,7 +177,11 @@ def on_shutdown() -> None:
 
 @app.get("/health")
 def health_check():
-    return {"status": "ok", "news_enhanced": True}
+    return {
+        "status": "ok",
+        "news_enhanced": True,
+        "cdn_chunk_size_limit_bytes": 2 * 1024 * 1024 * 1024,
+    }
 
 
 @app.head("/health")
@@ -200,6 +223,13 @@ app.include_router(properties.router, prefix="/properties", tags=["properties"])
 app.include_router(launcher_download.router, prefix="/launcher-download", tags=["launcher-download"])
 app.include_router(updates.router)
 app.include_router(lua_admin.router)
+app.include_router(graphics.router, prefix="/games", tags=["graphics"])
+app.include_router(launcher_diagnostics.router)
+app.include_router(manifests_v2.router)
+app.include_router(downloads_v2.router)
+app.include_router(self_heal_v2.router)
+app.include_router(updates_v2.router)
+app.include_router(cdn_v2.router)
 
 
 @app.websocket("/ws")

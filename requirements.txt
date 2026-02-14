@@ -18,3 +18,5 @@ aiohttp>=3.13.0
 aiofiles>=23.2.0
 pyinstaller>=6.11.0
 beautifulsoup4>=4.12.0
+pillow>=10.4.0
+blake3>=1.0.4

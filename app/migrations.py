@@ -23,6 +23,7 @@ def ensure_schema() -> None:
     json_type = _json_type()
     timestamp_type = "TIMESTAMP" if engine.dialect.name == "postgresql" else "DATETIME"
     timestamp_default = _now_default() if engine.dialect.name == "postgresql" else None
+    bytes_type = "BIGINT" if engine.dialect.name == "postgresql" else "INTEGER"
 
     if "users" in tables:
         columns = {col["name"] for col in inspector.get_columns("users")}
@@ -50,6 +51,41 @@ def ensure_schema() -> None:
             alters.append(f"ALTER TABLE users ADD COLUMN is_verified BOOLEAN DEFAULT {_bool_default(False)}")
         if "role" not in columns:
             alters.append("ALTER TABLE users ADD COLUMN role VARCHAR(20) DEFAULT 'user'")
+        _apply_alters(alters)
+
+    if "game_graphics_configs" in tables:
+        columns = {col["name"] for col in inspector.get_columns("game_graphics_configs")}
+        alters = []
+        if "dx12_flags" not in columns:
+            alters.append(f"ALTER TABLE game_graphics_configs ADD COLUMN dx12_flags {json_type}")
+        if "dx11_flags" not in columns:
+            alters.append(f"ALTER TABLE game_graphics_configs ADD COLUMN dx11_flags {json_type}")
+        if "vulkan_flags" not in columns:
+            alters.append(f"ALTER TABLE game_graphics_configs ADD COLUMN vulkan_flags {json_type}")
+        if "overlay_enabled" not in columns:
+            alters.append(
+                f"ALTER TABLE game_graphics_configs ADD COLUMN overlay_enabled BOOLEAN DEFAULT {_bool_default(True)}"
+            )
+        if "recommended_api" not in columns:
+            alters.append("ALTER TABLE game_graphics_configs ADD COLUMN recommended_api VARCHAR(20)")
+        if "executable" not in columns:
+            alters.append("ALTER TABLE game_graphics_configs ADD COLUMN executable VARCHAR(260)")
+        if "game_dir" not in columns:
+            alters.append("ALTER TABLE game_graphics_configs ADD COLUMN game_dir VARCHAR(260)")
+        if "created_at" not in columns:
+            if timestamp_default:
+                alters.append(
+                    f"ALTER TABLE game_graphics_configs ADD COLUMN created_at {timestamp_type} DEFAULT {timestamp_default}"
+                )
+            else:
+                alters.append(f"ALTER TABLE game_graphics_configs ADD COLUMN created_at {timestamp_type}")
+        if "updated_at" not in columns:
+            if timestamp_default:
+                alters.append(
+                    f"ALTER TABLE game_graphics_configs ADD COLUMN updated_at {timestamp_type} DEFAULT {timestamp_default}"
+                )
+            else:
+                alters.append(f"ALTER TABLE game_graphics_configs ADD COLUMN updated_at {timestamp_type}")
         _apply_alters(alters)
 
     if "games" in tables:
@@ -85,6 +121,70 @@ def ensure_schema() -> None:
             else:
                 alters.append(f"ALTER TABLE games ADD COLUMN updated_at {timestamp_type}")
         _apply_alters(alters)
+
+    if "user_profiles" in tables:
+        columns = {col["name"] for col in inspector.get_columns("user_profiles")}
+        alters = []
+        if "background_image" not in columns:
+            alters.append("ALTER TABLE user_profiles ADD COLUMN background_image VARCHAR(500)")
+        _apply_alters(alters)
+
+    if "download_tasks" in tables:
+        columns = {col["name"] for col in inspector.get_columns("download_tasks")}
+        alters = []
+        if "downloaded_bytes" not in columns:
+            alters.append(
+                f"ALTER TABLE download_tasks ADD COLUMN downloaded_bytes {bytes_type} DEFAULT 0"
+            )
+        if "total_bytes" not in columns:
+            alters.append(f"ALTER TABLE download_tasks ADD COLUMN total_bytes {bytes_type} DEFAULT 0")
+        if "network_bps" not in columns:
+            alters.append(f"ALTER TABLE download_tasks ADD COLUMN network_bps {bytes_type} DEFAULT 0")
+        if "disk_read_bps" not in columns:
+            alters.append(f"ALTER TABLE download_tasks ADD COLUMN disk_read_bps {bytes_type} DEFAULT 0")
+        if "disk_write_bps" not in columns:
+            alters.append(f"ALTER TABLE download_tasks ADD COLUMN disk_write_bps {bytes_type} DEFAULT 0")
+        if "read_bytes" not in columns:
+            alters.append(f"ALTER TABLE download_tasks ADD COLUMN read_bytes {bytes_type} DEFAULT 0")
+        if "written_bytes" not in columns:
+            alters.append(f"ALTER TABLE download_tasks ADD COLUMN written_bytes {bytes_type} DEFAULT 0")
+        if "remaining_bytes" not in columns:
+            alters.append(
+                f"ALTER TABLE download_tasks ADD COLUMN remaining_bytes {bytes_type} DEFAULT 0"
+            )
+        _apply_alters(alters)
+
+    if "game_play_sessions" not in tables:
+        started_default = f"DEFAULT {timestamp_default}" if timestamp_default else ""
+        created_default = f"DEFAULT {timestamp_default}" if timestamp_default else ""
+        updated_default = f"DEFAULT {timestamp_default}" if timestamp_default else ""
+        create_statement = f"""
+            CREATE TABLE game_play_sessions (
+                id VARCHAR(36) PRIMARY KEY,
+                user_id VARCHAR(36) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                game_id VARCHAR(36) NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+                started_at {timestamp_type} NOT NULL {started_default},
+                ended_at {timestamp_type},
+                duration_sec INTEGER DEFAULT 0,
+                exit_code INTEGER,
+                created_at {timestamp_type} {created_default},
+                updated_at {timestamp_type} {updated_default}
+            )
+        """
+        with engine.begin() as connection:
+            connection.execute(text(create_statement))
+            connection.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_game_play_sessions_user_id "
+                    "ON game_play_sessions (user_id)"
+                )
+            )
+            connection.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_game_play_sessions_game_id "
+                    "ON game_play_sessions (game_id)"
+                )
+            )
 
 
 def _apply_alters(statements: list[str]) -> None:

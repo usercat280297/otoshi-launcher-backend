@@ -139,6 +139,31 @@ class GameOut(BaseModel):
         from_attributes = True
 
 
+class GameGraphicsConfigBase(BaseModel):
+    dx12_flags: List[str] = Field(default_factory=list)
+    dx11_flags: List[str] = Field(default_factory=list)
+    vulkan_flags: List[str] = Field(default_factory=list)
+    overlay_enabled: bool = True
+    recommended_api: Optional[str] = None
+    executable: Optional[str] = None
+    game_dir: Optional[str] = None
+
+
+class GameGraphicsConfigIn(GameGraphicsConfigBase):
+    pass
+
+
+class GameGraphicsConfigOut(GameGraphicsConfigBase):
+    id: Optional[str] = None
+    game_id: str
+    source: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
 class SteamGridDBAssetOut(BaseModel):
     game_id: int
     name: str
@@ -196,6 +221,90 @@ class SteamCatalogOut(BaseModel):
     items: List[SteamCatalogItemOut]
 
 
+class AnimeItemOut(BaseModel):
+    id: str
+    title: str
+    detail_url: str
+    poster_image: Optional[str] = None
+    background_image: Optional[str] = None
+    episode_label: Optional[str] = None
+    rating_label: Optional[str] = None
+    section_title: Optional[str] = None
+
+
+class AnimeTagLinkOut(BaseModel):
+    id: str
+    label: str
+    href: str
+
+
+class AnimeTagGroupOut(BaseModel):
+    id: str
+    title: str
+    href: Optional[str] = None
+    items: List[AnimeTagLinkOut] = Field(default_factory=list)
+
+
+class AnimeSectionOut(BaseModel):
+    id: str
+    title: str
+    items: List[AnimeItemOut]
+
+
+class AnimeHomeOut(BaseModel):
+    source: str
+    menu_tags: List[AnimeTagGroupOut] = Field(default_factory=list)
+    carousel: List[AnimeItemOut] = Field(default_factory=list)
+    sections: List[AnimeSectionOut]
+    updated_at: Optional[str] = None
+
+
+class AnimeEpisodeOut(BaseModel):
+    label: str
+    url: str
+
+
+class AnimeMetaEntryOut(BaseModel):
+    key: str
+    value: str
+
+
+class AnimeDetailOut(BaseModel):
+    url: str
+    title: str
+    description: Optional[str] = None
+    cover_image: Optional[str] = None
+    banner_image: Optional[str] = None
+    quality_label: Optional[str] = None
+    metadata: List[AnimeMetaEntryOut] = Field(default_factory=list)
+    breadcrumbs: List[AnimeTagLinkOut] = Field(default_factory=list)
+    episodes: List[AnimeEpisodeOut] = Field(default_factory=list)
+
+
+class AnimeServerEpisodeOut(BaseModel):
+    label: str
+    url: str
+    source_key: Optional[str] = None
+    play_mode: Optional[str] = None
+    episode_id: Optional[str] = None
+    episode_hash: Optional[str] = None
+
+
+class AnimeServerGroupOut(BaseModel):
+    name: str
+    episodes: List[AnimeServerEpisodeOut] = Field(default_factory=list)
+
+
+class AnimeEpisodeSourceOut(BaseModel):
+    url: str
+    title: str
+    quality_label: Optional[str] = None
+    server_groups: List[AnimeServerGroupOut] = Field(default_factory=list)
+    media_urls: List[str] = Field(default_factory=list)
+    player_scripts: List[str] = Field(default_factory=list)
+    player_hints: dict = Field(default_factory=dict)
+
+
 class SearchHistoryIn(BaseModel):
     query: str = Field(min_length=1)
 
@@ -247,12 +356,40 @@ class FixCatalogOut(BaseModel):
     items: List[FixEntryOut]
 
 
+class FixGuideStepOut(BaseModel):
+    title: str
+    description: str
+
+
+class FixGuideOut(BaseModel):
+    title: str
+    summary: Optional[str] = None
+    steps: List[FixGuideStepOut] = Field(default_factory=list)
+    warnings: List[str] = Field(default_factory=list)
+    notes: List[str] = Field(default_factory=list)
+    updated_at: Optional[str] = None
+
+
+class FixCategoryOut(BaseModel):
+    id: str
+    name: str
+    description: Optional[str] = None
+    icon: Optional[str] = None
+
+
+class FixEntryDetailOut(FixEntryOut):
+    kind: str
+    category: Optional[FixCategoryOut] = None
+    guide: FixGuideOut
+
+
 class DownloadMethodOut(BaseModel):
     id: str
     label: str
     description: Optional[str] = None
     recommended: bool = False
     enabled: bool = True
+    note: Optional[str] = None
 
 
 class DownloadVersionOut(BaseModel):
@@ -295,12 +432,54 @@ class LibraryEntryOut(BaseModel):
         from_attributes = True
 
 
+class LibraryPlaySessionIn(BaseModel):
+    started_at: Optional[datetime] = None
+    ended_at: Optional[datetime] = None
+    duration_sec: Optional[int] = None
+    exit_code: Optional[int] = None
+
+
+class LibraryPlaySessionOut(BaseModel):
+    id: str
+    user_id: str
+    game_id: str
+    started_at: datetime
+    ended_at: Optional[datetime] = None
+    duration_sec: int = 0
+    exit_code: Optional[int] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class LibraryPlaytimeIn(BaseModel):
+    duration_sec: int = Field(ge=0)
+
+
+class LibraryPlaytimeOut(BaseModel):
+    entry_id: str
+    game_id: str
+    playtime_hours: float
+    last_played_at: Optional[datetime] = None
+
+
 class DownloadTaskOut(BaseModel):
     id: str
     status: str
     progress: int
     speed_mbps: float
     eta_minutes: int
+    downloaded_bytes: Optional[int] = 0
+    total_bytes: Optional[int] = 0
+    network_bps: Optional[int] = 0
+    disk_read_bps: Optional[int] = 0
+    disk_write_bps: Optional[int] = 0
+    read_bytes: Optional[int] = 0
+    written_bytes: Optional[int] = 0
+    remaining_bytes: Optional[int] = 0
+    updated_at: Optional[datetime] = None
     game: GameOut
 
     class Config:
@@ -563,9 +742,12 @@ class PreorderOut(BaseModel):
 
 class UserProfileOut(BaseModel):
     user_id: str
+    nickname: Optional[str] = None
+    avatar_url: Optional[str] = None
     headline: Optional[str]
     bio: Optional[str]
     location: Optional[str]
+    background_image: Optional[str] = None
     social_links: dict
     created_at: datetime
     updated_at: datetime
@@ -575,10 +757,31 @@ class UserProfileOut(BaseModel):
 
 
 class UserProfileUpdate(BaseModel):
+    nickname: Optional[str] = None
+    avatar_url: Optional[str] = None
     headline: Optional[str] = None
     bio: Optional[str] = None
     location: Optional[str] = None
+    background_image: Optional[str] = None
     social_links: Optional[dict] = None
+
+
+class CommunityCommentIn(BaseModel):
+    message: str = Field(min_length=1, max_length=1000)
+    app_id: Optional[str] = None
+    app_name: Optional[str] = None
+
+
+class CommunityCommentOut(BaseModel):
+    id: str
+    user_id: str
+    username: str
+    display_name: Optional[str] = None
+    avatar_url: Optional[str] = None
+    message: str
+    app_id: Optional[str] = None
+    app_name: Optional[str] = None
+    created_at: datetime
 
 
 class ReviewIn(BaseModel):

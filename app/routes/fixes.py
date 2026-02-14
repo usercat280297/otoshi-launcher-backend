@@ -5,11 +5,12 @@ from typing import Any, List, Optional
 from fastapi import APIRouter, Query, HTTPException
 from pydantic import BaseModel
 
-from ..schemas import FixCatalogOut
+from ..schemas import FixCatalogOut, FixEntryDetailOut
 from ..services.fixes import (
     get_bypass_by_category,
     get_bypass_catalog,
     get_bypass_categories,
+    get_fix_entry_detail,
     get_bypass_option,
     get_online_fix_catalog,
     get_online_fix_options,
@@ -68,6 +69,18 @@ def bypass_by_category(
 ) -> dict[str, Any]:
     """Get bypass games filtered by category (ea, ubisoft, rockstar, denuvo)."""
     return get_bypass_by_category(category_id, offset=offset, limit=limit)
+
+
+@router.get("/detail/{kind}/{app_id}", response_model=FixEntryDetailOut)
+def fix_entry_detail(kind: str, app_id: str):
+    """Get detail page payload for a specific online-fix/bypass game."""
+    if kind not in {"online-fix", "bypass"}:
+        raise HTTPException(status_code=404, detail="Fix type not supported")
+
+    detail = get_fix_entry_detail(kind, app_id)
+    if not detail:
+        raise HTTPException(status_code=404, detail="Fix entry not found")
+    return detail
 
 
 @router.get("/online-fix/{app_id}/options")
@@ -141,7 +154,28 @@ def get_bypass_app_option(app_id: str) -> CrackOptionDetail:
 @router.get("/{app_id}/install-guide")
 def get_crack_install_guide(app_id: str, fix_type: str = Query("online-fix")) -> CrackInstallGuide:
     """Get installation guide for a crack/fix."""
-    if fix_type == "online-fix":
+    normalized_type = "bypass" if fix_type == "bypass" else "online-fix"
+    detail = get_fix_entry_detail(normalized_type, app_id)
+
+    if detail and isinstance(detail.get("guide"), dict):
+        guide = detail["guide"]
+        steps = [
+            step.get("description", "")
+            for step in guide.get("steps", [])
+            if isinstance(step, dict) and step.get("description")
+        ]
+        warnings = [w for w in guide.get("warnings", []) if isinstance(w, str)]
+        notes = "\n".join([n for n in guide.get("notes", []) if isinstance(n, str)]) or None
+        return CrackInstallGuide(
+            app_id=app_id,
+            name=detail.get("name"),
+            steps=steps or ["Guide content is not available yet."],
+            warnings=warnings,
+            notes=notes,
+        )
+
+    # Backward-compatible fallback
+    if normalized_type == "online-fix":
         options = get_online_fix_options(app_id)
         name = options[0].get("name") if options else None
     else:
@@ -165,5 +199,4 @@ def get_crack_install_guide(app_id: str, fix_type: str = Query("online-fix")) ->
         ],
         notes="You can uninstall this fix anytime to restore original files.",
     )
-
 

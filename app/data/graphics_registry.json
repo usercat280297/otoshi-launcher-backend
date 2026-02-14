@@ -1,0 +1,14 @@
+﻿{
+  "2358720": {
+    "name": "Black Myth: Wukong",
+    "dx12": ["-force-d3d12", "-high-priority"],
+    "dx11": ["-force-d3d11"],
+    "vulkan": ["-force-vulkan", "-vk-validation"],
+    "executable": "b1_launcher.exe",
+    "gameDir": "Game/Binaries/Win64",
+    "recommendations": {
+      "gpu": "RTX 3080+",
+      "preferred": "dx12"
+    }
+  }
+}

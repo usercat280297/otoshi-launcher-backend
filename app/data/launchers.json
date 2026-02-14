@@ -1,0 +1,12 @@
+﻿{
+  "defaults": {
+    "rendererPriority": ["dx12", "dx11", "vulkan"],
+    "overlayDefault": true,
+    "rendererArgs": {
+      "dx12": ["-dx12"],
+      "dx11": ["-dx11"],
+      "vulkan": ["-vulkan"]
+    }
+  },
+  "games": {}
+}

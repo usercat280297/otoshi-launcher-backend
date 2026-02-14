@@ -3,21 +3,23 @@
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, UploadFile, File, Query, Depends
 from pydantic import BaseModel
 
-from app.updates.update_manager import UpdateManager, UpdateVersion, FileInfo
-from app.routes.deps import require_admin_access
+from .update_manager import FileInfo, UpdateManager, UpdateVersion
+from ..routes.deps import require_admin_access
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/updates", tags=["updates"])
 
 # Initialize update manager
-STORAGE_DIR = Path("storage/updates")
+_STORAGE_ROOT = Path(os.getenv("OTOSHI_STORAGE_DIR", "storage"))
+STORAGE_DIR = _STORAGE_ROOT / "updates"
 STORAGE_DIR.mkdir(parents=True, exist_ok=True)
 update_manager = UpdateManager(STORAGE_DIR)
 

@@ -11,6 +11,9 @@ from .steam_catalog import get_catalog_page, get_hot_appids, search_store
 MAX_CANDIDATES = 200
 MAX_NUMERIC_CANDIDATES = 60
 MIN_SCORE = 25.0
+LOCAL_FALLBACK_BATCH_SIZE = 48
+LOCAL_FALLBACK_MAX_SCAN = 1200
+LOCAL_FALLBACK_TARGET_MATCHES = 40
 
 _NON_ALNUM = re.compile(r"[^a-z0-9]+", re.IGNORECASE)
 
@@ -109,6 +112,38 @@ def _collect_numeric_candidates(query: str, allowed: list[str]) -> list[str]:
     return matches[:MAX_NUMERIC_CANDIDATES]
 
 
+def _local_fallback_candidates(query: str, allowed_appids: list[str]) -> list[dict]:
+    """
+    Fallback search path for environments where Steam storesearch endpoint is
+    blocked/unreachable. We scan local catalog summaries in bounded batches.
+    """
+    if not allowed_appids:
+        return []
+
+    max_scan = min(len(allowed_appids), LOCAL_FALLBACK_MAX_SCAN)
+    candidate_ids = allowed_appids[:max_scan]
+    candidates: list[dict] = []
+
+    for start in range(0, len(candidate_ids), LOCAL_FALLBACK_BATCH_SIZE):
+        batch = candidate_ids[start : start + LOCAL_FALLBACK_BATCH_SIZE]
+        if not batch:
+            continue
+        summaries = get_catalog_page(batch)
+        if not summaries:
+            continue
+        for item in summaries:
+            name = str(item.get("name") or "").strip()
+            if not name:
+                continue
+            if score_candidate(query, item, {}) >= MIN_SCORE:
+                candidates.append(item)
+
+        if len(candidates) >= LOCAL_FALLBACK_TARGET_MATCHES:
+            break
+
+    return candidates
+
+
 def search_catalog(
     query: str,
     allowed_appids: list[str],
@@ -142,6 +177,16 @@ def search_catalog(
                 candidates[app_id] = item
         if len(candidates) >= MAX_CANDIDATES:
             break
+
+    # Fallback: if upstream store search has no candidates (geo/network blocked),
+    # do a bounded local scan of known appids.
+    if not candidates:
+        for item in _local_fallback_candidates(trimmed, allowed_appids):
+            app_id = str(item.get("app_id") or "")
+            if app_id and app_id in allowed_set:
+                candidates[app_id] = item
+            if len(candidates) >= MAX_CANDIDATES:
+                break
 
     candidate_ids = list(candidates.keys())
     if candidate_ids:

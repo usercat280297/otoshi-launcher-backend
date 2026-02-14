@@ -1,9 +1,17 @@
+from datetime import datetime
+from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from ..db import get_db
-from ..models import Game, LibraryEntry, PaymentTransaction, User
-from ..schemas import LibraryEntryOut
+from ..models import Game, GamePlaySession, LibraryEntry, PaymentTransaction, User
+from ..schemas import (
+    LibraryEntryOut,
+    LibraryPlaySessionIn,
+    LibraryPlaySessionOut,
+    LibraryPlaytimeIn,
+    LibraryPlaytimeOut,
+)
 from .deps import get_current_user
 
 router = APIRouter()
@@ -81,10 +89,11 @@ def mark_installed(
     return entry
 
 
-@router.post("/{entry_id}/playtime", response_model=LibraryEntryOut)
+@router.post("/{entry_id}/playtime", response_model=LibraryPlaytimeOut)
 def update_playtime(
     entry_id: str,
-    hours: float,
+    payload: Optional[LibraryPlaytimeIn] = None,
+    hours: Optional[float] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -96,7 +105,66 @@ def update_playtime(
     if not entry:
         raise HTTPException(status_code=404, detail="Library entry not found")
 
-    entry.playtime_hours = max(0.0, entry.playtime_hours + hours)
+    delta_hours = 0.0
+    if payload is not None:
+        delta_hours = max(0.0, float(payload.duration_sec) / 3600.0)
+    elif hours is not None:
+        delta_hours = max(0.0, float(hours))
+
+    entry.playtime_hours = max(0.0, float(entry.playtime_hours or 0.0) + delta_hours)
+    entry.last_played_at = datetime.utcnow()
     db.commit()
     db.refresh(entry)
-    return entry
+    return LibraryPlaytimeOut(
+        entry_id=entry.id,
+        game_id=entry.game_id,
+        playtime_hours=entry.playtime_hours,
+        last_played_at=entry.last_played_at,
+    )
+
+
+@router.post("/{entry_id}/session", response_model=LibraryPlaySessionOut)
+def record_play_session(
+    entry_id: str,
+    payload: LibraryPlaySessionIn,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    entry = (
+        db.query(LibraryEntry)
+        .filter(LibraryEntry.id == entry_id, LibraryEntry.user_id == current_user.id)
+        .first()
+    )
+    if not entry:
+        raise HTTPException(status_code=404, detail="Library entry not found")
+
+    started_at = payload.started_at or datetime.utcnow()
+    ended_at = payload.ended_at
+
+    if payload.duration_sec is not None:
+        duration_sec = max(0, int(payload.duration_sec))
+    elif ended_at:
+        duration_sec = max(0, int((ended_at - started_at).total_seconds()))
+    else:
+        duration_sec = 0
+
+    if ended_at is None and duration_sec > 0:
+        ended_at = datetime.utcfromtimestamp(started_at.timestamp() + duration_sec)
+
+    session = GamePlaySession(
+        user_id=current_user.id,
+        game_id=entry.game_id,
+        started_at=started_at,
+        ended_at=ended_at,
+        duration_sec=duration_sec,
+        exit_code=payload.exit_code,
+    )
+    db.add(session)
+
+    if duration_sec > 0:
+        entry.playtime_hours = max(0.0, float(entry.playtime_hours or 0.0) + (duration_sec / 3600.0))
+    entry.last_played_at = ended_at or started_at
+
+    db.commit()
+    db.refresh(session)
+    return session

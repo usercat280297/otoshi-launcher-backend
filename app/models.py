@@ -6,6 +6,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     Integer,
+    BigInteger,
     Boolean,
     ForeignKey,
     JSON,
@@ -85,6 +86,7 @@ class User(Base):
         back_populates="user",
         cascade="all, delete",
     )
+    play_sessions = relationship("GamePlaySession", back_populates="user", cascade="all, delete")
 
 
 class OAuthIdentity(Base):
@@ -152,6 +154,34 @@ class Game(Base):
     depots = relationship("DeveloperDepot", back_populates="game", cascade="all, delete")
     remote_downloads = relationship("RemoteDownload", back_populates="game", cascade="all, delete")
     preorders = relationship("Preorder", back_populates="game", cascade="all, delete")
+    play_sessions = relationship("GamePlaySession", back_populates="game", cascade="all, delete")
+    graphics_config = relationship(
+        "GameGraphicsConfig",
+        back_populates="game",
+        uselist=False,
+        cascade="all, delete",
+    )
+
+
+class GameGraphicsConfig(Base):
+    __tablename__ = "game_graphics_configs"
+    __table_args__ = (
+        UniqueConstraint("game_id", name="uq_game_graphics_config_game_id"),
+    )
+
+    id = Column(String(36), primary_key=True, default=generate_id)
+    game_id = Column(String(36), ForeignKey("games.id"), nullable=False)
+    dx12_flags = Column(JSON, default=list)
+    dx11_flags = Column(JSON, default=list)
+    vulkan_flags = Column(JSON, default=list)
+    overlay_enabled = Column(Boolean, default=True)
+    recommended_api = Column(String(20), nullable=True)
+    executable = Column(String(260), nullable=True)
+    game_dir = Column(String(260), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    game = relationship("Game", back_populates="graphics_config")
 
 
 class SteamGridDBCache(Base):
@@ -197,11 +227,36 @@ class DownloadTask(Base):
     progress = Column(Integer, default=0)
     speed_mbps = Column(Float, default=0.0)
     eta_minutes = Column(Integer, default=0)
+    downloaded_bytes = Column(BigInteger, default=0)
+    total_bytes = Column(BigInteger, default=0)
+    network_bps = Column(BigInteger, default=0)
+    disk_read_bps = Column(BigInteger, default=0)
+    disk_write_bps = Column(BigInteger, default=0)
+    read_bytes = Column(BigInteger, default=0)
+    written_bytes = Column(BigInteger, default=0)
+    remaining_bytes = Column(BigInteger, default=0)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow)
 
     user = relationship("User", back_populates="downloads")
     game = relationship("Game", back_populates="downloads")
+
+
+class GamePlaySession(Base):
+    __tablename__ = "game_play_sessions"
+
+    id = Column(String(36), primary_key=True, default=generate_id)
+    user_id = Column(String(36), ForeignKey("users.id"), nullable=False)
+    game_id = Column(String(36), ForeignKey("games.id"), nullable=False)
+    started_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    ended_at = Column(DateTime, nullable=True)
+    duration_sec = Column(Integer, default=0)
+    exit_code = Column(Integer, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    user = relationship("User", back_populates="play_sessions")
+    game = relationship("Game", back_populates="play_sessions")
 
 
 class TelemetryEvent(Base):
@@ -453,6 +508,7 @@ class UserProfile(Base):
     headline = Column(String(120), nullable=True)
     bio = Column(Text, nullable=True)
     location = Column(String(120), nullable=True)
+    background_image = Column(String(500), nullable=True)
     social_links = Column(JSON, default=dict)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

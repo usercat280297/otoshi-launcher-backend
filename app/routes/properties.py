@@ -127,12 +127,23 @@ def get_install_info(app_id: str):
     # Try to find the game in common locations
     # This is a simplified version - real implementation would check Steam library folders
 
-    common_paths = [
-        f"C:\\Program Files (x86)\\Steam\\steamapps\\common",
-        f"C:\\Program Files\\Steam\\steamapps\\common",
-        f"D:\\SteamLibrary\\steamapps\\common",
-        f"E:\\SteamLibrary\\steamapps\\common",
-    ]
+    common_paths = []
+    env_install_root = os.environ.get("DEFAULT_INSTALL_ROOT") or os.environ.get(
+        "OTOSHI_INSTALL_ROOT"
+    )
+    if env_install_root:
+        common_paths.append(env_install_root)
+
+    program_files_x86 = os.environ.get("ProgramFiles(x86)", "C:\\Program Files (x86)")
+    program_files = os.environ.get("ProgramFiles", "C:\\Program Files")
+    common_paths.extend(
+        [
+            os.path.join(program_files_x86, "Otoshi Launcher", "otoshiapps", "common"),
+            os.path.join(program_files, "Otoshi Launcher", "otoshiapps", "common"),
+            "D:\\OtoshiLibrary\\otoshiapps\\common",
+            "E:\\OtoshiLibrary\\otoshiapps\\common",
+        ]
+    )
 
     for base_path in common_paths:
         if not os.path.exists(base_path):

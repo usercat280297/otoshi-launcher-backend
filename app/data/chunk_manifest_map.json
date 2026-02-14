@@ -1,16 +1,125 @@
 {
   "steam_app_id": {
+    "1687950": {
+      "folder": "P5R",
+      "game_name": "P5R",
+      "version": "v1.04",
+      "hf_folder": "P5R/P5R/P5R v1.04",
+      "manifest": "P5R\\manifest_v1.04.json"
+    },
     "3527290": {
       "folder": "PEAK",
       "game_name": "PEAK",
-      "hf_folder": "PEAK/PEAK 1.51a"
+      "version": "PEAK 1.51a",
+      "hf_folder": "PEAK/PEAK 1.51a",
+      "manifest": "PEAK\\manifest_PEAK 1.51a.json"
     }
   },
   "name": {
+    "persona5royal": {
+      "folder": "P5R",
+      "game_name": "P5R",
+      "version": "v1.04",
+      "hf_folder": "P5R/P5R/P5R v1.04",
+      "manifest": "P5R\\manifest_v1.04.json"
+    },
+    "silenthillfdlc": {
+      "folder": "SILENT HILL F",
+      "game_name": "Silent Hill f DLC",
+      "version": "Silent Hill F DLC",
+      "hf_folder": "SILENT HILL F/Silent Hill F DLC",
+      "manifest": "SILENT HILL F\\manifest_Silent Hill F DLC.json"
+    },
+    "blackmythwukong": {
+      "folder": "BlackMythWukong",
+      "game_name": "BlackMythWukong",
+      "version": "v1.0.21.23831",
+      "hf_folder": "BlackMythWukong/BlackMythWukong/BlackMythWukong v1.0.21.23831",
+      "manifest": "BlackMythWukong\\manifest_v1.0.21.23831.json"
+    },
+    "codevein2": {
+      "folder": "CodeVein2",
+      "game_name": "CodeVein2",
+      "version": "v1.0.2",
+      "hf_folder": "CODE VEIN II/CODE VEIN II/CODE VEIN II v1.0.2",
+      "manifest": "CodeVein2\\manifest_v1.0.2.json"
+    },
+    "footballmanager26": {
+      "folder": "football manager 26",
+      "game_name": "Football Manager 26",
+      "version": "Football Manager 26 v26.1.1",
+      "hf_folder": "football manager 26/Football Manager 26 v26.1.1",
+      "manifest": "football manager 26\\manifest_Football Manager 26 v26.1.1.json"
+    },
+    "nioh3": {
+      "folder": "Nioh3",
+      "game_name": "Nioh3",
+      "version": "v1.03",
+      "hf_folder": "Nioh3/Nioh3/Nioh3 v1.03",
+      "manifest": "Nioh3\\manifest_v1.03.json"
+    },
+    "p5r": {
+      "folder": "P5R",
+      "game_name": "P5R",
+      "version": "v1.04",
+      "hf_folder": "P5R/P5R/P5R v1.04",
+      "manifest": "P5R\\manifest_v1.04.json"
+    },
+    "palworld": {
+      "folder": "Palworld",
+      "game_name": "Palworld",
+      "version": "Palworld V0.7",
+      "hf_folder": "Palworld/Palworld V0.7",
+      "manifest": "Palworld\\manifest_Palworld V0.7.json"
+    },
     "peak": {
       "folder": "PEAK",
       "game_name": "PEAK",
-      "hf_folder": "PEAK/PEAK 1.51a"
+      "version": "PEAK 1.51a",
+      "hf_folder": "PEAK/PEAK 1.51a",
+      "manifest": "PEAK\\manifest_PEAK 1.51a.json"
+    },
+    "residentevil4biohazardre4": {
+      "folder": "RESIDENT EVIL 4  BIOHAZARD RE4",
+      "game_name": "RESIDENT EVIL 4  BIOHAZARD RE4",
+      "version": "v3.5",
+      "hf_folder": "RESIDENT EVIL 4  BIOHAZARD RE4/RESIDENT EVIL 4  BIOHAZARD RE4/RESIDENT EVIL 4  BIOHAZARD RE4 v3.5",
+      "manifest": "RESIDENT EVIL 4  BIOHAZARD RE4\\manifest_v3.5.json"
+    },
+    "ride": {
+      "folder": "RV THERE YET",
+      "game_name": "Ride",
+      "version": "RV THERE YET? 1.0.14956",
+      "hf_folder": "RV THERE YET/RV THERE YET? 1.0.14956",
+      "manifest": "RV THERE YET\\manifest_RV THERE YET_ 1.0.14956.json"
+    },
+    "rvthereyet": {
+      "folder": "RV THERE YET",
+      "game_name": "Ride",
+      "version": "RV THERE YET? 1.0.14956",
+      "hf_folder": "RV THERE YET/RV THERE YET? 1.0.14956",
+      "manifest": "RV THERE YET\\manifest_RV THERE YET_ 1.0.14956.json"
+    },
+    "silenthillf": {
+      "folder": "SILENT HILL F",
+      "game_name": "SILENT HILL f",
+      "version": "Silent Hill F",
+      "hf_folder": "SILENT HILL F/Silent Hill F",
+      "manifest": "SILENT HILL F\\manifest_Silent Hill F.json"
+    },
+    "yakuzakiwami3": {
+      "folder": "YakuzaKiwami3",
+      "game_name": "YakuzaKiwami3",
+      "version": "v1.11",
+      "hf_folder": "YakuzaKiwami3/YakuzaKiwami3/YakuzaKiwami3 v1.11",
+      "manifest": "YakuzaKiwami3\\manifest_v1.11.json"
+    },
+    "yugiohmasterduel": {
+      "folder": "Yu-gi-oh! master duel",
+      "game_name": "Yu-Gi-Oh!  Master Duel",
+      "version": "YU-GI-OH! Master duel v2.5.0",
+      "hf_folder": "Yu-gi-oh! master duel/YU-GI-OH! Master duel v2.5.0",
+      "manifest": "Yu-gi-oh! master duel\\manifest_YU-GI-OH! Master duel v2.5.0.json"
     }
   }
 }

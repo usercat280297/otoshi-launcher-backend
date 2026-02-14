@@ -2,13 +2,14 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 import json
+import os
 from pathlib import Path
 
 from ..db import get_db
 from ..models import DownloadTask, Game, User
 from ..schemas import DownloadTaskOut, DownloadOptionsOut, DownloadPrepareIn
 from .deps import get_current_user, get_current_user_optional
-from ..services.steam_catalog import get_steam_detail, get_steam_summary
+from ..services.steam_catalog import get_catalog_page, get_steam_detail, get_steam_summary
 from ..services.download_options import (
     build_download_options,
     ensure_install_directory,
@@ -18,10 +19,102 @@ from typing import Optional
 from ..services.settings import get_download_settings, set_download_settings
 from ..core.cache import cache_client
 from ..utils.auth_validator import AuthValidator, log_download_attempt, check_download_permission
-from ..core.config import MANIFEST_REMOTE_ONLY
+from ..core.config import MANIFEST_REMOTE_ONLY, HF_REPO_ID, HF_REPO_TYPE, HF_REVISION
 from ..services.remote_game_data import get_manifest_from_server
 
 router = APIRouter()
+
+
+_ALLOWED_STATUSES = {
+    "queued",
+    "downloading",
+    "paused",
+    "verifying",
+    "completed",
+    "failed",
+    "cancelled",
+}
+
+_STATUS_TRANSITIONS = {
+    "queued": {"downloading", "cancelled", "failed"},
+    "downloading": {"paused", "verifying", "completed", "failed", "cancelled"},
+    "paused": {"downloading", "cancelled", "failed"},
+    "verifying": {"completed", "failed", "cancelled"},
+    "completed": set(),
+    "failed": {"downloading", "cancelled"},
+    "cancelled": {"downloading"},
+}
+
+
+def _manifest_root_dir() -> Path:
+    env_root = os.getenv("CHUNK_MANIFEST_DIR", "").strip()
+    if env_root:
+        return Path(env_root)
+    return Path(__file__).parent.parent.parent / "auto_chunk_check_update"
+
+
+def _first_or_none(value):
+    if isinstance(value, (list, tuple)):
+        for item in value:
+            if item:
+                return item
+        return None
+    return value if value else None
+
+
+def _resolve_steam_metadata(app_id: str) -> tuple[Optional[dict], Optional[dict]]:
+    summary = get_steam_summary(app_id)
+    detail = get_steam_detail(app_id)
+
+    if not summary:
+        page = get_catalog_page([app_id])
+        if page:
+            summary = page[0]
+
+    if not detail and summary:
+        detail = summary
+
+    if detail:
+        return summary, detail
+
+    options = build_download_options(app_id)
+    if not options:
+        return summary, None
+
+    name = options.get("name") or f"Steam App {app_id}"
+    fallback_desc = "Chunk manifest mapped title"
+    if options.get("size_label"):
+        fallback_desc = f"{fallback_desc} ({options.get('size_label')})"
+
+    fallback_detail = {
+        "app_id": str(app_id),
+        "name": name,
+        "short_description": fallback_desc,
+        "developers": [],
+        "publishers": [],
+        "release_date": None,
+        "genres": [],
+        "platforms": ["windows"],
+        "header_image": None,
+        "background": None,
+        "screenshots": [],
+        "movies": [],
+        "pc_requirements": None,
+    }
+
+    if not summary:
+        summary = {
+            "app_id": str(app_id),
+            "name": name,
+            "short_description": fallback_desc,
+            "genres": [],
+            "platforms": ["windows"],
+            "release_date": None,
+            "header_image": None,
+            "background": None,
+        }
+
+    return summary, fallback_detail
 
 
 def _update_version_override(app_id: str, version: Optional[str]) -> dict:
@@ -39,6 +132,22 @@ def _update_version_override(app_id: str, version: Optional[str]) -> dict:
     if version:
         cache_client.delete(f"manifest:{slug}:{version}")
     return cleaned
+
+
+def _set_download_status(task: DownloadTask, status: str) -> None:
+    normalized = (status or "").strip().lower()
+    if normalized not in _ALLOWED_STATUSES:
+        raise HTTPException(status_code=400, detail="Invalid download status")
+    current = (task.status or "queued").strip().lower()
+    if normalized == current:
+        return
+    allowed_next = _STATUS_TRANSITIONS.get(current, set())
+    if normalized not in allowed_next:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Invalid status transition: {current} -> {normalized}",
+        )
+    task.status = normalized
 
 
 @router.get("/", response_model=list[DownloadTaskOut])
@@ -79,8 +188,16 @@ def start_download(
         game_id=game_id,
         status="downloading",
         progress=0,
-        speed_mbps=90.0,
-        eta_minutes=12
+        speed_mbps=0.0,
+        eta_minutes=0,
+        downloaded_bytes=0,
+        total_bytes=0,
+        network_bps=0,
+        disk_read_bps=0,
+        disk_write_bps=0,
+        read_bytes=0,
+        written_bytes=0,
+        remaining_bytes=0,
     )
     game.total_downloads = (game.total_downloads or 0) + 1
     db.add(task)
@@ -95,29 +212,36 @@ def start_steam_download(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    summary = get_steam_summary(app_id)
-    if not summary:
+    summary, detail = _resolve_steam_metadata(app_id)
+    if not detail:
         raise HTTPException(status_code=404, detail="Steam app not found")
 
-    detail = get_steam_detail(app_id) or summary
+    summary = summary or {}
     slug = f"steam-{app_id}"
     game = db.query(Game).filter(Game.slug == slug).first()
     if not game:
+        developers = detail.get("developers")
+        publishers = detail.get("publishers")
         game = Game(
             slug=slug,
             title=detail.get("name") or slug,
             short_description=detail.get("short_description"),
-            developer=(detail.get("developers") or [None])[0],
-            publisher=(detail.get("publishers") or [None])[0],
-            release_date=detail.get("release_date"),
-            genres=detail.get("genres") or [],
-            platforms=detail.get("platforms") or [],
+            developer=_first_or_none(developers),
+            publisher=_first_or_none(publishers),
+            release_date=detail.get("release_date") or summary.get("release_date"),
+            genres=detail.get("genres") or summary.get("genres") or [],
+            platforms=detail.get("platforms") or summary.get("platforms") or [],
             price=0.0,
             discount_percent=0,
             rating=0.0,
-            header_image=detail.get("header_image"),
-            hero_image=detail.get("background") or detail.get("header_image"),
-            background_image=detail.get("background"),
+            header_image=detail.get("header_image") or summary.get("header_image"),
+            hero_image=(
+                detail.get("background")
+                or detail.get("header_image")
+                or summary.get("background")
+                or summary.get("header_image")
+            ),
+            background_image=detail.get("background") or summary.get("background"),
             screenshots=detail.get("screenshots") or [],
             videos=detail.get("movies") or [],
             system_requirements=detail.get("pc_requirements") or {},
@@ -140,8 +264,16 @@ def start_steam_download(
         game_id=game.id,
         status="downloading",
         progress=0,
-        speed_mbps=90.0,
+        speed_mbps=0.0,
         eta_minutes=12,
+        downloaded_bytes=0,
+        total_bytes=0,
+        network_bps=0,
+        disk_read_bps=0,
+        disk_write_bps=0,
+        read_bytes=0,
+        written_bytes=0,
+        remaining_bytes=0,
     )
     game.total_downloads = (game.total_downloads or 0) + 1
     db.add(task)
@@ -263,6 +395,16 @@ def start_steam_download_with_options(
 def update_progress(
     download_id: str,
     progress: int,
+    downloaded_bytes: Optional[int] = None,
+    total_bytes: Optional[int] = None,
+    network_bps: Optional[int] = None,
+    disk_read_bps: Optional[int] = None,
+    disk_write_bps: Optional[int] = None,
+    read_bytes: Optional[int] = None,
+    written_bytes: Optional[int] = None,
+    remaining_bytes: Optional[int] = None,
+    speed_mbps: Optional[float] = None,
+    eta_minutes: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -275,7 +417,35 @@ def update_progress(
         raise HTTPException(status_code=404, detail="Download task not found")
 
     task.progress = max(0, min(progress, 100))
-    task.status = "completed" if task.progress >= 100 else "downloading"
+    if downloaded_bytes is not None:
+        task.downloaded_bytes = max(0, int(downloaded_bytes))
+    if total_bytes is not None:
+        task.total_bytes = max(0, int(total_bytes))
+    if network_bps is not None:
+        task.network_bps = max(0, int(network_bps))
+    if disk_read_bps is not None:
+        task.disk_read_bps = max(0, int(disk_read_bps))
+    if disk_write_bps is not None:
+        task.disk_write_bps = max(0, int(disk_write_bps))
+    if read_bytes is not None:
+        task.read_bytes = max(0, int(read_bytes))
+    if written_bytes is not None:
+        task.written_bytes = max(0, int(written_bytes))
+    if remaining_bytes is not None:
+        task.remaining_bytes = max(0, int(remaining_bytes))
+    if speed_mbps is not None:
+        task.speed_mbps = max(0.0, float(speed_mbps))
+    if eta_minutes is not None:
+        task.eta_minutes = max(0, int(eta_minutes))
+
+    if task.progress >= 100:
+        task.status = "completed"
+        task.eta_minutes = 0
+        task.remaining_bytes = 0
+        if task.total_bytes and not task.downloaded_bytes:
+            task.downloaded_bytes = task.total_bytes
+    elif task.status not in {"paused", "cancelled", "failed"}:
+        task.status = "downloading"
     task.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(task)
@@ -296,7 +466,11 @@ def pause_download(
     if not task:
         raise HTTPException(status_code=404, detail="Download task not found")
 
-    task.status = "paused"
+    if task.status in {"completed", "cancelled"}:
+        raise HTTPException(status_code=409, detail=f"Cannot pause task in status {task.status}")
+    _set_download_status(task, "paused")
+    task.speed_mbps = 0.0
+    task.network_bps = 0
     task.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(task)
@@ -317,7 +491,69 @@ def resume_download(
     if not task:
         raise HTTPException(status_code=404, detail="Download task not found")
 
-    task.status = "downloading"
+    if task.status == "completed":
+        raise HTTPException(status_code=409, detail="Cannot resume a completed download")
+    _set_download_status(task, "downloading")
+    task.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(task)
+    return task
+
+
+@router.post("/{download_id}/cancel", response_model=DownloadTaskOut)
+def cancel_download(
+    download_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    task = (
+        db.query(DownloadTask)
+        .filter(DownloadTask.id == download_id, DownloadTask.user_id == current_user.id)
+        .first()
+    )
+    if not task:
+        raise HTTPException(status_code=404, detail="Download task not found")
+    if task.status == "completed":
+        raise HTTPException(status_code=409, detail="Cannot cancel a completed download")
+
+    _set_download_status(task, "cancelled")
+    task.speed_mbps = 0.0
+    task.network_bps = 0
+    task.disk_read_bps = 0
+    task.disk_write_bps = 0
+    task.eta_minutes = 0
+    task.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(task)
+    return task
+
+
+@router.post("/{download_id}/status", response_model=DownloadTaskOut)
+def update_download_status(
+    download_id: str,
+    status: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    task = (
+        db.query(DownloadTask)
+        .filter(DownloadTask.id == download_id, DownloadTask.user_id == current_user.id)
+        .first()
+    )
+    if not task:
+        raise HTTPException(status_code=404, detail="Download task not found")
+
+    normalized = (status or "").strip().lower()
+    _set_download_status(task, normalized)
+    if normalized == "completed":
+        task.progress = 100
+        task.eta_minutes = 0
+        task.remaining_bytes = 0
+    if normalized in {"paused", "cancelled", "failed"}:
+        task.speed_mbps = 0.0
+        task.network_bps = 0
+        task.disk_read_bps = 0
+        task.disk_write_bps = 0
     task.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(task)
@@ -332,7 +568,7 @@ def get_download_strategy(game_id: str, version: str):
     """
     try:
         # Try to load game versions from auto_chunk_check_update
-        versions_file = Path(__file__).parent.parent.parent / "auto_chunk_check_update" / "game_versions.json"
+        versions_file = _manifest_root_dir() / "game_versions.json"
 
         versions_data = {}
 
@@ -452,7 +688,7 @@ def get_chunks_manifest(game_name: str, version: str):
             return payload
 
         # Try to find manifest file
-        manifest_dir = Path(__file__).parent.parent.parent / "auto_chunk_check_update" / game_name
+        manifest_dir = _manifest_root_dir() / game_name
 
         # Try exact version match first
         manifest_file = manifest_dir / f"manifest_{game_name} {version}.json"
@@ -485,16 +721,46 @@ def get_chunks_manifest(game_name: str, version: str):
         with open(manifest_file, 'r', encoding='utf-8') as f:
             manifest = json.load(f)
 
+        def _encode_hf_path(value: str) -> str:
+            from urllib.parse import quote
+            cleaned = str(value).replace("\\", "/").lstrip("/")
+            if not cleaned:
+                return ""
+            return "/".join(quote(part, safe="-_.~") for part in cleaned.split("/"))
+
+        def _build_hf_base_url(repo_id: str) -> str:
+            repo_type = (HF_REPO_TYPE or "dataset").strip().lower()
+            revision = (HF_REVISION or "main").strip()
+            if repo_type == "space":
+                return f"https://huggingface.co/spaces/{repo_id}/resolve/{revision}"
+            if repo_type == "model":
+                return f"https://huggingface.co/{repo_id}/resolve/{revision}"
+            return f"https://huggingface.co/datasets/{repo_id}/resolve/{revision}"
+
         # Return manifest with Hugging Face URLs
-        hf_repo = manifest.get("hf_repo", "MangaVNteam/lua-games")
-        hf_game_path = manifest.get("hf_game_path", f"{game_name}/{version}")
+        hf_repo = manifest.get("hf_repo") or manifest.get("hf_repo_id") or HF_REPO_ID or "MangaVNteam/lua-games"
+        hf_base_url = manifest.get("hf_base_url") or _build_hf_base_url(hf_repo)
+        manifest_version = str(manifest.get("version") or version or "").strip() or version
+        folder_name = manifest_dir.name if manifest_dir.exists() else str(manifest.get("game_name") or game_name).strip()
+        hf_game_path = (
+            manifest.get("hf_game_path")
+            or manifest.get("hf_folder")
+            or f"{folder_name}/{manifest_version}".strip("/")
+        )
 
         # Build chunk URLs
         chunks = manifest.get('chunks', [])
         for chunk in chunks:
-            chunk_filename = chunk.get('filename', '')
-            # Format: https://huggingface.co/datasets/{repo}/resolve/main/{game_path}/{chunk_filename}
-            chunk['hf_url'] = f"https://huggingface.co/datasets/{hf_repo}/resolve/main/{hf_game_path}/{chunk_filename}"
+            if chunk.get("hf_url"):
+                continue
+            if chunk.get("url"):
+                chunk["hf_url"] = chunk.get("url")
+                continue
+            chunk_filename = chunk.get('path') or chunk.get('filename') or ''
+            if not chunk_filename:
+                continue
+            safe_path = _encode_hf_path(f"{hf_game_path}/{chunk_filename}")
+            chunk['hf_url'] = f"{hf_base_url.rstrip('/')}/{safe_path}"
 
         return {
             "status": "success",
@@ -507,6 +773,7 @@ def get_chunks_manifest(game_name: str, version: str):
             "compression_ratio": manifest.get('compression_ratio'),
             "chunk_size_mb": manifest.get('chunk_size_mb'),
             "hf_repo": hf_repo,
+            "hf_base_url": hf_base_url,
             "hf_game_path": hf_game_path,
             "chunks": chunks
         }
@@ -587,7 +854,15 @@ def start_simple_download(
             status="downloading",
             progress=0,
             speed_mbps=0.0,
-            eta_minutes=0
+            eta_minutes=0,
+            downloaded_bytes=0,
+            total_bytes=0,
+            network_bps=0,
+            disk_read_bps=0,
+            disk_write_bps=0,
+            read_bytes=0,
+            written_bytes=0,
+            remaining_bytes=0,
         )
 
         game.total_downloads = (game.total_downloads or 0) + 1

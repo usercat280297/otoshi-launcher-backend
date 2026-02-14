@@ -110,6 +110,7 @@ DENUVO_APP_IDS = [
     3046600,
     1785650,
     3764200,
+    3937550,  # Yakuza Kiwami 3 & Dark Ties
 ]
 
 DENUVO_APP_ID_SET = {str(app_id) for app_id in DENUVO_APP_IDS}

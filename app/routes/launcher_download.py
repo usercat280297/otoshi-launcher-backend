@@ -8,6 +8,8 @@ from pydantic import BaseModel
 from pathlib import Path
 import os
 import hashlib
+import re
+import zipfile
 
 router = APIRouter()
 
@@ -28,6 +30,15 @@ class DownloadStats(BaseModel):
     total_downloads: int
     version: str
     platforms: dict
+
+
+class LauncherArtifact(BaseModel):
+    kind: str
+    version: str
+    filename: str
+    size_bytes: int
+    sha256: str
+    download_url: str
 
 
 def get_file_hash(filepath: Path) -> str:
@@ -59,6 +70,65 @@ def find_installer_file() -> Path | None:
     return None
 
 
+def _extract_version(name: str) -> str:
+    match = re.search(r"v(\d+(?:\.\d+)*)", name, re.IGNORECASE)
+    if match:
+        return match.group(1)
+    return LAUNCHER_VERSION
+
+
+def _zip_folder(source_dir: Path, zip_path: Path) -> None:
+    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
+        for file_path in source_dir.rglob("*"):
+            if not file_path.is_file():
+                continue
+            arcname = file_path.relative_to(source_dir.parent)
+            archive.write(file_path, arcname.as_posix())
+
+
+def find_portable_file() -> Path | None:
+    if not DOWNLOADS_DIR.exists():
+        return None
+
+    zipped = sorted(
+        DOWNLOADS_DIR.glob("OtoshiLauncher-Portable-*.zip"),
+        key=lambda item: item.stat().st_mtime,
+        reverse=True,
+    )
+    if zipped:
+        return zipped[0]
+
+    folders = sorted(
+        [item for item in DOWNLOADS_DIR.glob("OtoshiLauncher-Portable-*") if item.is_dir()],
+        key=lambda item: item.stat().st_mtime,
+        reverse=True,
+    )
+    if not folders:
+        return None
+
+    latest_folder = folders[0]
+    zip_path = DOWNLOADS_DIR / f"{latest_folder.name}.zip"
+    try:
+        folder_mtime = latest_folder.stat().st_mtime
+        zip_mtime = zip_path.stat().st_mtime if zip_path.exists() else 0
+        if (not zip_path.exists()) or zip_mtime < folder_mtime:
+            _zip_folder(latest_folder, zip_path)
+        return zip_path
+    except Exception:
+        return None
+
+
+def _to_artifact(path: Path, kind: str) -> LauncherArtifact:
+    return LauncherArtifact(
+        kind=kind,
+        version=_extract_version(path.name),
+        filename=path.name,
+        size_bytes=path.stat().st_size,
+        sha256=get_file_hash(path),
+        download_url=f"/launcher-download/file/{path.name}",
+    )
+
+
 @router.get("/info", response_model=LauncherInfo)
 def get_launcher_info():
     """Get information about the latest launcher version"""
@@ -76,6 +146,22 @@ def get_launcher_info():
         sha256=file_hash,
         download_url=f"/launcher-download/file/{installer.name}",
     )
+
+
+@router.get("/artifacts", response_model=list[LauncherArtifact])
+def get_launcher_artifacts():
+    artifacts: list[LauncherArtifact] = []
+    installer = find_installer_file()
+    if installer:
+        artifacts.append(_to_artifact(installer, "installer"))
+
+    portable = find_portable_file()
+    if portable:
+        artifacts.append(_to_artifact(portable, "portable"))
+
+    if not artifacts:
+        raise HTTPException(status_code=404, detail="No launcher artifacts found")
+    return artifacts
 
 
 @router.get("/file/{filename}")

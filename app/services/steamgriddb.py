@@ -40,7 +40,10 @@ _STEAMGRIDDB_SEMAPHORE = threading.Semaphore(
 _DISK_CACHE_LOCK = threading.Lock()
 _DISK_CACHE_LOADED = False
 _DISK_CACHE: dict[str, dict[str, Any]] = {}
-_DISK_CACHE_PATH = Path(__file__).resolve().parents[2] / "storage" / "steamgriddb_cache.json"
+_STORAGE_ROOT = Path(
+    os.getenv("OTOSHI_STORAGE_DIR", Path(__file__).resolve().parents[2] / "storage")
+)
+_DISK_CACHE_PATH = _STORAGE_ROOT / "steamgriddb_cache.json"
 
 _TITLE_CLEAN_RE = re.compile(r"[\u2122\u00ae\u00a9]")
 _TITLE_EDITION_RE = re.compile(
@@ -316,6 +319,28 @@ def build_steam_fallback_assets(steam_app_id: str) -> dict[str, Optional[str]]:
     }
 
 
+def _normalize_assets_payload(
+    steam_app_id: str,
+    title: Optional[str],
+    assets: Optional[dict[str, Optional[str]]] = None,
+) -> dict[str, Optional[str]]:
+    fallback = build_steam_fallback_assets(steam_app_id)
+    merged = {
+        "grid": (assets or {}).get("grid") or fallback.get("grid"),
+        "hero": (assets or {}).get("hero") or fallback.get("hero"),
+        "logo": (assets or {}).get("logo") or fallback.get("logo"),
+        "icon": (assets or {}).get("icon") or fallback.get("icon"),
+    }
+    return {
+        "game_id": int((assets or {}).get("game_id") or 0),
+        "name": title or steam_app_id,
+        "grid": merged.get("grid"),
+        "hero": merged.get("hero"),
+        "logo": merged.get("logo"),
+        "icon": merged.get("icon"),
+    }
+
+
 def get_cached_assets(steam_app_id: str) -> Optional[dict[str, Optional[str]]]:
     if not steam_app_id or not str(steam_app_id).isdigit():
         return None
@@ -395,7 +420,11 @@ def resolve_assets(steam_app_id: Optional[str], title: Optional[str]) -> dict[st
     if steam_app_id:
         cached = get_cached_assets(steam_app_id)
         if cached:
-            return cached
+            return _normalize_assets_payload(
+                steam_app_id=steam_app_id,
+                title=title or str(cached.get("name") or steam_app_id),
+                assets=cached,
+            )
 
     search_title = title
     if not search_title and steam_app_id:
@@ -422,17 +451,14 @@ def resolve_assets(steam_app_id: Optional[str], title: Optional[str]) -> dict[st
 
     if not game or not game.get("id"):
         fallback = build_steam_fallback_assets(steam_app_id)
-        result = {
-            "game_id": 0,
-            "name": search_title or steam_app_id,
-            "grid": fallback.get("grid"),
-            "hero": fallback.get("hero"),
-            "logo": fallback.get("logo"),
-            "icon": fallback.get("icon"),
-        }
+        result = _normalize_assets_payload(
+            steam_app_id=steam_app_id,
+            title=search_title or steam_app_id,
+            assets=fallback,
+        )
         save_cached_assets(
             steam_app_id,
-            result["name"],
+            str(result["name"]),
             None,
             fallback,
             source="steam_fallback",

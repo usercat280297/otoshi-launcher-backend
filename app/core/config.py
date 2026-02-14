@@ -118,8 +118,11 @@ for required_origin in ("tauri://localhost", "https://tauri.localhost", "http://
     if required_origin not in CORS_ORIGINS:
         CORS_ORIGINS.append(required_origin)
 
+_BACKEND_PORT = os.getenv("BACKEND_PORT", "8000").strip() or "8000"
+_LOCAL_API_BASE = os.getenv("LOCAL_API_BASE", f"http://127.0.0.1:{_BACKEND_PORT}").strip()
+
 FRONTEND_BASE_URL = os.getenv("FRONTEND_BASE_URL", "http://localhost:5173")
-OAUTH_CALLBACK_BASE_URL = os.getenv("OAUTH_CALLBACK_BASE_URL", "")
+OAUTH_CALLBACK_BASE_URL = os.getenv("OAUTH_CALLBACK_BASE_URL", _LOCAL_API_BASE)
 OAUTH_DEBUG_ERRORS = os.getenv("OAUTH_DEBUG_ERRORS", "true").lower() in (
     "1",
     "true",
@@ -206,7 +209,10 @@ HF_REVISION = os.getenv("HF_REVISION", "main")
 HF_STORAGE_BASE_PATH = os.getenv("HF_STORAGE_BASE_PATH", "")
 HF_CHUNK_PATH_TEMPLATE = os.getenv("HF_CHUNK_PATH_TEMPLATE", "")
 HF_CHUNK_MODE = os.getenv("HF_CHUNK_MODE", "auto")
-HF_TIMEOUT_SECONDS = int(os.getenv("HF_TIMEOUT_SECONDS", "15"))
+HF_TIMEOUT_SECONDS = int(os.getenv("HF_TIMEOUT_SECONDS", "120"))
+HF_CONNECT_TIMEOUT_SECONDS = int(os.getenv("HF_CONNECT_TIMEOUT_SECONDS", "10"))
+HF_MAX_RETRIES = int(os.getenv("HF_MAX_RETRIES", "3"))
+HF_RETRY_BACKOFF_SECONDS = float(os.getenv("HF_RETRY_BACKOFF_SECONDS", "1.25"))
 
 REDIS_URL = os.getenv("REDIS_URL", "")
 CACHE_TTL_SECONDS = int(os.getenv("CACHE_TTL_SECONDS", "120"))
@@ -232,14 +238,19 @@ DISCOVERY_FORCE_STEAM = os.getenv("DISCOVERY_FORCE_STEAM", "false").lower() in (
     "yes",
     "on",
 )
+ANIME_SOURCE_URL = os.getenv("ANIME_SOURCE_URL", "https://animevietsub.vip/")
+ANIME_REQUEST_TIMEOUT_SECONDS = int(os.getenv("ANIME_REQUEST_TIMEOUT_SECONDS", "12"))
+ANIME_CACHE_TTL_SECONDS = int(os.getenv("ANIME_CACHE_TTL_SECONDS", "600"))
 
-CDN_PRIMARY_URLS = os.getenv("CDN_PRIMARY_URLS", "http://localhost:8000").split(",")
-CDN_FALLBACK_URLS = os.getenv("CDN_FALLBACK_URLS", "http://127.0.0.1:8000").split(",")
+_DEFAULT_CDN_PRIMARY = f"http://127.0.0.1:{_BACKEND_PORT}"
+_DEFAULT_CDN_FALLBACK = f"http://localhost:{_BACKEND_PORT},http://127.0.0.1:{_BACKEND_PORT}"
+CDN_PRIMARY_URLS = os.getenv("CDN_PRIMARY_URLS", _DEFAULT_CDN_PRIMARY).split(",")
+CDN_FALLBACK_URLS = os.getenv("CDN_FALLBACK_URLS", _DEFAULT_CDN_FALLBACK).split(",")
 
 STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "")
 STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
 
 VNPAY_TMN_CODE = os.getenv("VNPAY_TMN_CODE", "")
 VNPAY_SECRET_KEY = os.getenv("VNPAY_SECRET_KEY", "")
-VNPAY_RETURN_URL = os.getenv("VNPAY_RETURN_URL", "http://localhost:8000/payments/vnpay/return")
+VNPAY_RETURN_URL = os.getenv("VNPAY_RETURN_URL", f"{_LOCAL_API_BASE}/payments/vnpay/return")
 VNPAY_API_URL = os.getenv("VNPAY_API_URL", "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html")

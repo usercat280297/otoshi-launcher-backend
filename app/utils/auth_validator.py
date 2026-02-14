@@ -131,9 +131,13 @@ def log_download_attempt(user_id: str, game_id: str, success: bool, error: str =
         "error": error
     }
     
-    # Store in cache for monitoring (expire after 24 hours)
-    cache_key = f"download_log:{user_id}:{timestamp}"
-    cache_client.set(cache_key, log_entry, expire=86400)
+    # Store in cache for monitoring (expire after 24 hours).
+    # Keep logging non-blocking: failures here must never break download flow.
+    try:
+        cache_key = f"download_log:{str(user_id)}:{timestamp}"
+        cache_client.set_json(cache_key, log_entry, ttl=86400)
+    except Exception:
+        pass
     
     # Also log to file/database in production
     print(f"[DOWNLOAD_LOG] {log_entry}")

@@ -26,7 +26,7 @@
       "name": "DENUVO",
       "description": "Games with Denuvo anti-tamper protection",
       "icon": "denuvo",
-      "games": ["1172380", "2050650", "1413480", "1687950", "2215260", "2055290", "2680010", "1817230", "1551360", "1903340", "1382330", "1113000", "990080", "39140", "287700", "1244460", "1874000", "532210", "601150", "594570", "3764200"]
+      "games": ["1172380", "2050650", "1413480", "1687950", "2215260", "2055290", "2680010", "1817230", "1551360", "1903340", "1382330", "1113000", "990080", "39140", "287700", "1244460", "1874000", "532210", "601150", "594570", "3764200", "2358720", "2215430", "1237320", "1777620", "2486820"]
     }
   ],
   "games": {
@@ -279,10 +279,35 @@
       "name": "LIFE IS STRANGE 2",
       "category": "denuvo"
     },
+    "2358720": {
+      "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/Black%20myth%20wukong/crack/OxoLemon_BMW_Crack_baseonOxZeOn_hypervisor.rar?download=true",
+      "name": "Black Myth: Wukong",
+      "category": "denuvo"
+    },
     "3240220": {
       "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/GRAND%20THEFT%20AUTO%20V%20ENHANCED%20c.r.zip?download=true",
       "name": "GRAND THEFT AUTO V ENHANCED",
       "category": "rockstar"
+    },
+    "2215430": {
+      "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/C.r.ack%20files/Ghost%20of%20Tsushima%20DIRECTOR'S%20CUT%20crack.rar?download=true",
+      "name": "Ghost of Tsushima Director's Cut",
+      "category": "denuvo"
+    },
+    "1237320": {
+      "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/C.r.ack%20files/Sonic.Frontiers.Crack.Only-voices38.rar?download=true",
+      "name": "Sonic Frontiers",
+      "category": "denuvo"
+    },
+    "1777620": {
+      "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/C.r.ack%20files/Soul.Hackers.2.HYPERVISOR.Intel.Beta1-KIRIGIRI.rar?download=true",
+      "name": "Soul Hackers 2",
+      "category": "denuvo"
+    },
+    "2486820": {
+      "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/C.r.ack%20files/Sonic.Racing.CrossWorlds.HYPERVISOR-KIRIGIRI.rar?download=true",
+      "name": "Sonic Racing: CrossWorlds",
+      "category": "denuvo"
     }
   }
 }

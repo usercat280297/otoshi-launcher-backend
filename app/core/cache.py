@@ -1,4 +1,5 @@
 import json
+import os
 import time
 from pathlib import Path
 from typing import Any, Optional
@@ -11,7 +12,10 @@ except ImportError:  # pragma: no cover
 from .config import REDIS_URL, CACHE_TTL_SECONDS
 
 # File-based storage for OAuth states to survive restarts
-_OAUTH_STATE_FILE = Path(__file__).resolve().parents[2] / "storage" / "oauth_states.json"
+_STORAGE_ROOT = Path(
+    os.getenv("OTOSHI_STORAGE_DIR", Path(__file__).resolve().parents[2] / "storage")
+)
+_OAUTH_STATE_FILE = _STORAGE_ROOT / "oauth_states.json"
 
 
 def _load_oauth_states() -> dict[str, tuple[Optional[float], str]]:
@@ -113,6 +117,29 @@ class CacheClient:
             self.redis.delete(key)
             return
         self.fallback.pop(key, None)
+
+    def delete_prefix(self, prefix: str) -> int:
+        removed = 0
+        if self.redis:
+            cursor = 0
+            pattern = f"{prefix}*"
+            try:
+                while True:
+                    cursor, keys = self.redis.scan(cursor=cursor, match=pattern, count=200)
+                    if keys:
+                        self.redis.delete(*keys)
+                        removed += len(keys)
+                    if cursor == 0:
+                        break
+            except Exception:
+                return removed
+            return removed
+
+        for key in list(self.fallback.keys()):
+            if key.startswith(prefix):
+                del self.fallback[key]
+                removed += 1
+        return removed
 
     def set_session(self, user_id: str, token: str, ttl: int) -> None:
         key = f"session:{user_id}"

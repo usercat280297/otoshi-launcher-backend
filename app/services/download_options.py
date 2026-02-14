@@ -19,6 +19,7 @@ from ..services.steam_catalog import get_steam_detail, get_steam_summary
 
 _SIZE_PATTERN = re.compile(r"(?:Storage|Hard Drive|Disk Space)[^0-9]*([0-9]+(?:\\.[0-9]+)?)\\s*(TB|GB|MB)", re.I)
 _VERSIONS_FILE = Path(__file__).resolve().parents[1] / "data" / "steam_versions.json"
+_CHUNK_MANIFEST_MAP_FILE = Path(__file__).resolve().parents[1] / "data" / "chunk_manifest_map.json"
 
 
 def _format_bytes(value: Optional[int]) -> Optional[str]:
@@ -77,6 +78,34 @@ def _manifest_size_bytes(app_id: str) -> Optional[int]:
         return int(size)
     except (TypeError, ValueError):
         return None
+
+
+def _fallback_detail_from_manifest_map(app_id: str) -> Optional[dict]:
+    if not _CHUNK_MANIFEST_MAP_FILE.exists():
+        return None
+    try:
+        payload = json.loads(_CHUNK_MANIFEST_MAP_FILE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+
+    steam_map = payload.get("steam_app_id") if isinstance(payload, dict) else None
+    if not isinstance(steam_map, dict):
+        return None
+
+    entry = steam_map.get(str(app_id))
+    if not isinstance(entry, dict):
+        return None
+
+    game_name = str(entry.get("game_name") or entry.get("folder") or app_id).strip() or app_id
+    version = str(entry.get("version") or "").strip()
+    summary = f"Chunk manifest mapped title ({version})" if version else "Chunk manifest mapped title"
+
+    return {
+        "name": game_name,
+        "short_description": summary,
+        "release_date": None,
+        "pc_requirements": None,
+    }
 
 
 def _default_install_root() -> str:
@@ -161,15 +190,40 @@ def _hf_unavailable_reason(has_manifest: bool) -> Optional[str]:
     return None
 
 
+def _aria2_available() -> bool:
+    env_bin = (os.getenv("LAUNCHER_ARIA2C_PATH") or "").strip()
+    if env_bin:
+        candidate = Path(env_bin)
+        if candidate.exists():
+            return True
+    return shutil.which("aria2c") is not None
+
+
 def list_download_methods(has_manifest: bool) -> list[dict]:
     hf_enabled = bool(HF_REPO_ID and huggingface_fetcher.enabled() and has_manifest)
     hf_note = None if hf_enabled else _hf_unavailable_reason(has_manifest)
+    aria2_enabled = _aria2_available()
+    aria2_note = None if aria2_enabled else "aria2c not found on client PATH"
+    auto_note_parts = []
+    if not aria2_enabled:
+        auto_note_parts.append("aria2c unavailable, fallback to internal downloader")
+    if not hf_enabled:
+        auto_note_parts.append("HF chunks unavailable, fallback to direct CDN")
+    auto_note = "; ".join(auto_note_parts) if auto_note_parts else None
     methods = [
+        {
+            "id": "auto",
+            "label": "Auto (recommended)",
+            "description": "Automatically choose the fastest stable engine and fallback safely.",
+            "recommended": True,
+            "enabled": True,
+            "note": auto_note,
+        },
         {
             "id": "hf_chunks",
             "label": "Hugging Face chunks",
             "description": "Resume-friendly chunks with CDN fallback.",
-            "recommended": hf_enabled,
+            "recommended": False,
             "enabled": hf_enabled,
             "note": hf_note,
         },
@@ -177,8 +231,16 @@ def list_download_methods(has_manifest: bool) -> list[dict]:
             "id": "cdn_direct",
             "label": "Direct CDN",
             "description": "Single-stream download from the primary CDN.",
-            "recommended": not hf_enabled,
+            "recommended": False,
             "enabled": True,
+        },
+        {
+            "id": "aria2c",
+            "label": "aria2c multi-connection",
+            "description": "External aria2c engine for aggressive multi-connection download.",
+            "recommended": False,
+            "enabled": aria2_enabled,
+            "note": aria2_note,
         },
     ]
     return methods
@@ -188,6 +250,8 @@ def build_download_options(app_id: str, install_root: Optional[str] = None) -> O
     detail = get_steam_detail(app_id)
     if not detail:
         detail = get_steam_summary(app_id) or {}
+    if not detail:
+        detail = _fallback_detail_from_manifest_map(app_id) or {}
     if not detail:
         return None
     name = detail.get("name") or str(app_id)

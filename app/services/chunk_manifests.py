@@ -32,6 +32,7 @@ _NAME_CLEAN = re.compile(r"[^a-z0-9]+")
 
 _PRIMARY_URLS = [url.strip() for url in CDN_PRIMARY_URLS if url.strip()]
 _FALLBACK_URLS = [url.strip() for url in CDN_FALLBACK_URLS if url.strip()]
+_CHUNK_V2_SOURCE_MODE = os.getenv("CHUNK_V2_SOURCE_MODE", "hybrid_hf_cdn").strip().lower()
 
 
 @dataclass(frozen=True)
@@ -280,7 +281,7 @@ def get_chunk_versions_for_game(app_id: str, game_name: str) -> list[dict]:
         # Try remote manifests if local not found
         if _REMOTE_ENABLED and _remote and _remote.is_remote_enabled():
             print(f"[ChunkManifests] No local manifests for {game_name}, trying remote...")
-            return _remote.get_remote_game_versions(app_id, game_name)
+            return _remote.get_remote_game_versions(game_name)
         return []
     
     latest = _pick_latest(filtered)
@@ -304,7 +305,7 @@ def get_chunk_manifest_size(app_id: str, game_name: str, version_override: Optio
         # Try remote manifests
         if _REMOTE_ENABLED and _remote and _remote.is_remote_enabled():
             print(f"[ChunkManifests] No local manifest for {game_name}, trying remote size...")
-            remote_meta = _remote.resolve_remote_manifest(app_id, game_name, version_override)
+            remote_meta = _remote.resolve_remote_manifest(game_name, version_override)
             if remote_meta:
                 size = remote_meta.original_size_bytes or remote_meta.size_bytes
                 return size if size > 0 else None
@@ -404,4 +405,9 @@ def build_chunk_manifest(game) -> Optional[dict]:
         "archive_dir": archive_dir,
         "archive_cleanup": match.archive_cleanup,
         "archive_files": sorted(cleaned_files),
+        "origin_mode": _CHUNK_V2_SOURCE_MODE,
     }
+
+
+def get_chunk_v2_source_mode() -> str:
+    return _CHUNK_V2_SOURCE_MODE
