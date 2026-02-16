@@ -110,10 +110,28 @@ def _resolve_lookup_assets(
     title: str | None,
     steam_app_id: str | None,
 ):
-    if not STEAMGRIDDB_API_KEY:
-        raise HTTPException(status_code=400, detail="SteamGridDB not configured")
     if not title and not steam_app_id:
         raise HTTPException(status_code=400, detail="Missing title or steam_app_id")
+
+    if not STEAMGRIDDB_API_KEY:
+        fallback = build_steam_fallback_assets(steam_app_id or "")
+        result = {
+            "game_id": 0,
+            "name": title or (steam_app_id or ""),
+            "grid": fallback.get("grid"),
+            "hero": fallback.get("hero"),
+            "logo": fallback.get("logo"),
+            "icon": fallback.get("icon"),
+        }
+        if steam_app_id:
+            save_cached_assets(
+                steam_app_id,
+                result["name"],
+                None,
+                fallback,
+                source="steam_fallback",
+            )
+        return result
 
     if steam_app_id:
         cached = get_cached_assets(steam_app_id)

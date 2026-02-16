@@ -202,6 +202,210 @@ class SteamGridDBCache(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class SteamTitle(Base):
+    __tablename__ = "steam_titles"
+
+    id = Column(String(36), primary_key=True, default=generate_id)
+    app_id = Column(String(20), unique=True, index=True, nullable=False)
+    name = Column(String(300), nullable=False)
+    normalized_name = Column(String(300), index=True, nullable=True)
+    title_type = Column(String(30), nullable=True)
+    release_date = Column(String(64), nullable=True)
+    developer = Column(String(200), nullable=True)
+    publisher = Column(String(200), nullable=True)
+    platform_flags = Column(JSON, default=dict)
+    state = Column(String(30), default="active")
+    source = Column(String(40), default="steam_api")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    metadata_row = relationship(
+        "SteamTitleMetadata",
+        back_populates="title",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
+    assets_row = relationship(
+        "SteamTitleAsset",
+        back_populates="title",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
+    aliases = relationship(
+        "SteamTitleAlias",
+        back_populates="title",
+        cascade="all, delete-orphan",
+    )
+    steamdb_row = relationship(
+        "SteamDbEnrichment",
+        back_populates="title",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
+
+
+class SteamTitleMetadata(Base):
+    __tablename__ = "steam_title_metadata"
+    __table_args__ = (UniqueConstraint("steam_title_id", name="uq_steam_title_metadata_title_id"),)
+
+    id = Column(String(36), primary_key=True, default=generate_id)
+    steam_title_id = Column(String(36), ForeignKey("steam_titles.id"), nullable=False)
+    short_description = Column(Text, nullable=True)
+    long_description = Column(Text, nullable=True)
+    genres = Column(JSON, default=list)
+    tags = Column(JSON, default=list)
+    platforms = Column(JSON, default=list)
+    requirements = Column(JSON, default=dict)
+    reviews = Column(JSON, default=dict)
+    players = Column(JSON, default=dict)
+    dlc_graph = Column(JSON, default=dict)
+    summary_payload = Column(JSON, default=dict)
+    detail_payload = Column(JSON, default=dict)
+    media_payload = Column(JSON, default=dict)
+    last_refreshed_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    title = relationship("SteamTitle", back_populates="metadata_row")
+
+
+class SteamTitleAsset(Base):
+    __tablename__ = "steam_title_assets"
+    __table_args__ = (UniqueConstraint("steam_title_id", name="uq_steam_title_assets_title_id"),)
+
+    id = Column(String(36), primary_key=True, default=generate_id)
+    steam_title_id = Column(String(36), ForeignKey("steam_titles.id"), nullable=False)
+    selected_source = Column(String(30), default="steam")
+    sgdb_assets = Column(JSON, default=dict)
+    epic_assets = Column(JSON, default=dict)
+    steam_assets = Column(JSON, default=dict)
+    selected_assets = Column(JSON, default=dict)
+    quality_score = Column(Float, default=0.0)
+    version = Column(Integer, default=1)
+    fetched_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    title = relationship("SteamTitle", back_populates="assets_row")
+
+
+class SteamTitleAlias(Base):
+    __tablename__ = "steam_title_aliases"
+
+    id = Column(String(36), primary_key=True, default=generate_id)
+    steam_title_id = Column(String(36), ForeignKey("steam_titles.id"), nullable=False, index=True)
+    alias = Column(String(300), nullable=False)
+    normalized_alias = Column(String(300), nullable=False, index=True)
+    locale = Column(String(12), default="en")
+    source = Column(String(30), default="steam")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    title = relationship("SteamTitle", back_populates="aliases")
+
+
+class SteamDbEnrichment(Base):
+    __tablename__ = "steamdb_enrichment"
+    __table_args__ = (UniqueConstraint("steam_title_id", name="uq_steamdb_enrichment_title_id"),)
+
+    id = Column(String(36), primary_key=True, default=generate_id)
+    steam_title_id = Column(String(36), ForeignKey("steam_titles.id"), nullable=False)
+    price_history = Column(JSON, default=list)
+    hidden_tags = Column(JSON, default=list)
+    depots = Column(JSON, default=list)
+    branch_map = Column(JSON, default=dict)
+    payload = Column(JSON, default=dict)
+    confidence = Column(Float, default=0.0)
+    source = Column(String(30), default="steamdb_structured")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    title = relationship("SteamTitle", back_populates="steamdb_row")
+
+
+class CrossStoreMapping(Base):
+    __tablename__ = "cross_store_mapping"
+
+    id = Column(String(36), primary_key=True, default=generate_id)
+    steam_app_id = Column(String(20), index=True, nullable=False)
+    epic_product_id = Column(String(120), nullable=False, index=True)
+    confidence = Column(Float, default=0.0)
+    evidence = Column(JSON, default=dict)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class IngestJob(Base):
+    __tablename__ = "ingest_jobs"
+
+    id = Column(String(36), primary_key=True, default=generate_id)
+    job_type = Column(String(40), nullable=False, index=True)
+    status = Column(String(20), nullable=False, default="pending", index=True)
+    source = Column(String(40), nullable=True)
+    processed_count = Column(Integer, default=0)
+    success_count = Column(Integer, default=0)
+    failure_count = Column(Integer, default=0)
+    error_message = Column(Text, nullable=True)
+    meta = Column(JSON, default=dict)
+    started_at = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class IngestCursor(Base):
+    __tablename__ = "ingest_cursors"
+
+    id = Column(String(36), primary_key=True, default=generate_id)
+    cursor_key = Column(String(120), unique=True, index=True, nullable=False)
+    cursor_value = Column(String(500), nullable=True)
+    cursor_meta = Column(JSON, default=dict)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class AssetJob(Base):
+    __tablename__ = "asset_jobs"
+
+    id = Column(String(36), primary_key=True, default=generate_id)
+    app_id = Column(String(20), index=True, nullable=False)
+    status = Column(String(20), default="pending", index=True)
+    priority = Column(Integer, default=100)
+    retries = Column(Integer, default=0)
+    last_error = Column(Text, nullable=True)
+    result_source = Column(String(20), nullable=True)
+    result_meta = Column(JSON, default=dict)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class SaveSyncState(Base):
+    __tablename__ = "save_sync_state"
+    __table_args__ = (UniqueConstraint("user_id", "app_id", name="uq_save_sync_state_user_app"),)
+
+    id = Column(String(36), primary_key=True, default=generate_id)
+    user_id = Column(String(36), ForeignKey("users.id"), nullable=True, index=True)
+    app_id = Column(String(20), nullable=False, index=True)
+    version_vector = Column(JSON, default=dict)
+    checksum_manifest = Column(JSON, default=dict)
+    device_state = Column(JSON, default=dict)
+    launch_options = Column(JSON, default=dict)
+    last_sync_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class SaveSyncEvent(Base):
+    __tablename__ = "save_sync_events"
+
+    id = Column(String(36), primary_key=True, default=generate_id)
+    user_id = Column(String(36), ForeignKey("users.id"), nullable=True, index=True)
+    app_id = Column(String(20), nullable=False, index=True)
+    event_type = Column(String(40), nullable=False, index=True)
+    payload = Column(JSON, default=dict)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+
 class LibraryEntry(Base):
     __tablename__ = "library_entries"
 

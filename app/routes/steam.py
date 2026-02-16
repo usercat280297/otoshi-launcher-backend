@@ -1,7 +1,10 @@
 import logging
 from typing import Any, Dict, List, Optional
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy.orm import Session
 
+from ..core.config import GLOBAL_INDEX_V1
+from ..db import get_db
 from ..schemas import (
     SearchHistoryIn,
     SearchHistoryOut,
@@ -14,8 +17,14 @@ from ..services.steam_catalog import (
     get_lua_appids,
     get_steam_detail,
     get_steam_summary,
+    search_store,
 )
 from ..services.download_options import build_download_options
+from ..services.steam_global_index import (
+    get_title_detail as get_global_index_title_detail,
+    list_catalog as list_global_catalog,
+    search_catalog as search_global_catalog,
+)
 from ..services.steam_search import get_popular_catalog, search_catalog
 from ..services.steam_extended import (
     get_steam_dlc,
@@ -179,13 +188,68 @@ def catalog(
     sort: str | None = Query(None),
     art_mode: str = Query("basic", pattern="^(none|basic|tiered)$"),
     thumb_w: int = Query(460, ge=120, le=1024),
+    db: Session = Depends(get_db),
 ):
     appids = get_lua_appids()
-    total = len(appids)
+    legacy_total = len(appids)
+
+    if GLOBAL_INDEX_V1:
+        if search:
+            total, items = search_global_catalog(
+                db=db,
+                q=search,
+                limit=limit,
+                offset=offset,
+            )
+            if total > 0 and items:
+                items = _inject_artwork(items, art_mode, thumb_w)
+                return {
+                    "total": total,
+                    "offset": offset,
+                    "limit": limit,
+                    "items": items,
+                }
+            # Global index not ready yet. Keep old behavior as fallback.
+
+        else:
+            total, items = list_global_catalog(
+                db=db,
+                limit=limit,
+                offset=offset,
+                sort=sort,
+                scope="all",
+            )
+            min_ready = max(5000, int(legacy_total * 0.5))
+            if total >= min_ready and items:
+                items = _inject_artwork(items, art_mode, thumb_w)
+                return {
+                    "total": total,
+                    "offset": offset,
+                    "limit": limit,
+                    "items": items,
+                }
+            # Global index not ready yet. Keep old behavior as fallback.
+
+    total = legacy_total
 
     if search:
         payload = search_catalog(search, appids, limit, offset, sort)
         items = payload.get("items") or []
+        # If Lua-scoped search misses, query global Steam store without Lua filter.
+        if not items:
+            store_results = search_store(search)
+            if store_results:
+                candidate_ids = [
+                    str(item.get("app_id"))
+                    for item in store_results
+                    if str(item.get("app_id") or "").strip().isdigit()
+                ]
+                if candidate_ids:
+                    candidate_ids = candidate_ids[offset : offset + limit]
+                    items = get_catalog_page(candidate_ids) or store_results[:limit]
+                else:
+                    items = store_results[:limit]
+                payload["total"] = max(int(payload.get("total") or 0), len(store_results))
         items = _inject_artwork(items, art_mode, thumb_w)
         total = int(payload.get("total") or 0)
         return {
@@ -224,7 +288,29 @@ def remove_search_history():
 
 
 @router.get("/search/popular", response_model=SteamCatalogOut)
-def popular(limit: int = Query(12, ge=1, le=100), offset: int = Query(0, ge=0)):
+def popular(
+    limit: int = Query(12, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+):
+    if GLOBAL_INDEX_V1:
+        total, items = list_global_catalog(
+            db=db,
+            limit=limit,
+            offset=offset,
+            sort="recent",
+            scope="all",
+        )
+        lua_total = len(get_lua_appids())
+        min_ready = max(5000, int(lua_total * 0.5))
+        if total >= min_ready and items:
+            return {
+                "total": total,
+                "offset": offset,
+                "limit": limit,
+                "items": items,
+            }
+
     payload = get_popular_catalog(limit, offset)
     return {
         "total": int(payload.get("total") or 0),
@@ -235,7 +321,13 @@ def popular(limit: int = Query(12, ge=1, le=100), offset: int = Query(0, ge=0)):
 
 
 @router.get("/games/{app_id}", response_model=SteamGameDetailOut)
-def game_detail(app_id: str):
+def game_detail(app_id: str, db: Session = Depends(get_db)):
+    if GLOBAL_INDEX_V1:
+        detail = get_global_index_title_detail(db, app_id)
+        if detail:
+            return detail
+        # Global index can be empty before first ingest; fall through to legacy path.
+
     detail = get_steam_detail(app_id)
     if not detail:
         detail = _build_fallback_detail_from_summary(app_id)

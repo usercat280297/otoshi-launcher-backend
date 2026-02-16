@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import html
+import json
 import re
 import threading
 from pathlib import Path
@@ -100,6 +101,10 @@ _LUA_PACK_LOCK = threading.Lock()
 _LUA_PACK_INDEX_SIGNATURE: Optional[str] = None
 _LUA_PACK_INDEX: Optional[Dict[str, List[str]]] = None
 _LUA_PACK_CLEANED_LEGACY = False
+_CHUNK_MANIFEST_MAP_FILE = Path(__file__).resolve().parents[1] / "data" / "chunk_manifest_map.json"
+_MANIFEST_NAME_MAP_LOCK = threading.Lock()
+_MANIFEST_NAME_MAP_SIGNATURE: Optional[str] = None
+_MANIFEST_NAME_MAP: Dict[str, str] = {}
 
 
 def _load_native_movie_builder():
@@ -361,6 +366,67 @@ def _steam_fallback_images(appid: str) -> Dict[str, str]:
         "header_image": f"{base}/header.jpg",
         "capsule_image": f"{base}/capsule_616x353.jpg",
         "background": f"{base}/library_hero.jpg",
+    }
+
+
+def _read_manifest_name_map() -> Dict[str, str]:
+    global _MANIFEST_NAME_MAP_SIGNATURE, _MANIFEST_NAME_MAP
+
+    if not _CHUNK_MANIFEST_MAP_FILE.exists():
+        with _MANIFEST_NAME_MAP_LOCK:
+            _MANIFEST_NAME_MAP_SIGNATURE = None
+            _MANIFEST_NAME_MAP = {}
+        return {}
+
+    try:
+        stat = _CHUNK_MANIFEST_MAP_FILE.stat()
+        signature = f"{int(stat.st_mtime)}:{stat.st_size}"
+    except OSError:
+        return {}
+
+    with _MANIFEST_NAME_MAP_LOCK:
+        if _MANIFEST_NAME_MAP_SIGNATURE == signature:
+            return dict(_MANIFEST_NAME_MAP)
+
+        try:
+            payload = json.loads(_CHUNK_MANIFEST_MAP_FILE.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            _MANIFEST_NAME_MAP_SIGNATURE = signature
+            _MANIFEST_NAME_MAP = {}
+            return {}
+
+        steam_map = payload.get("steam_app_id") if isinstance(payload, dict) else None
+        parsed: Dict[str, str] = {}
+        if isinstance(steam_map, dict):
+            for app_id, entry in steam_map.items():
+                if not isinstance(entry, dict):
+                    continue
+                raw_name = (entry.get("game_name") or entry.get("folder") or "").strip()
+                if raw_name:
+                    parsed[str(app_id)] = raw_name
+
+        _MANIFEST_NAME_MAP_SIGNATURE = signature
+        _MANIFEST_NAME_MAP = parsed
+        return dict(_MANIFEST_NAME_MAP)
+
+
+def _fallback_summary_for_appid(appid: str) -> Dict[str, Any]:
+    fallback = _steam_fallback_images(appid)
+    mapped_name = _read_manifest_name_map().get(str(appid))
+    return {
+        "app_id": str(appid),
+        "name": mapped_name or f"Steam App {appid}",
+        "short_description": "Chunk manifest mapped title" if mapped_name else None,
+        "header_image": fallback["header_image"],
+        "capsule_image": fallback["capsule_image"],
+        "background": fallback["background"],
+        "price": None,
+        "genres": [],
+        "release_date": None,
+        "platforms": ["windows"],
+        "required_age": None,
+        "dlc_count": 0,
+        "denuvo": str(appid) in DENUVO_APP_ID_SET,
     }
 
 
@@ -873,6 +939,11 @@ def get_catalog_page(appids: List[str]) -> List[Dict[str, Any]]:
         summary = cached_map.get(appid) or fetched.get(appid)
         if summary:
             summaries.append(summary)
+            continue
+
+        fallback = _fallback_summary_for_appid(appid)
+        cache_client.set_json(f"steam:summary:{appid}", fallback, ttl=STEAM_CACHE_TTL_SECONDS)
+        summaries.append(fallback)
 
     return summaries
 

@@ -231,6 +231,68 @@ class SteamCatalogOut(BaseModel):
     items: List[SteamCatalogItemOut]
 
 
+class SteamIndexAssetOut(BaseModel):
+    app_id: str
+    selected_source: str
+    assets: dict = Field(default_factory=dict)
+    quality_score: float = 0.0
+    version: int = 1
+
+
+class SteamIndexIngestLatestJobOut(BaseModel):
+    id: Optional[str] = None
+    status: str = "idle"
+    processed_count: int = 0
+    success_count: int = 0
+    failure_count: int = 0
+    started_at: Optional[str] = None
+    completed_at: Optional[str] = None
+    error_message: Optional[str] = None
+    external_enrichment: dict = Field(default_factory=dict)
+
+
+class SteamIndexTotalsOut(BaseModel):
+    titles: int = 0
+    assets: int = 0
+    steamdb_enrichment: int = 0
+    cross_store_mappings: int = 0
+
+
+class SteamIndexIngestStatusOut(BaseModel):
+    latest_job: SteamIndexIngestLatestJobOut
+    totals: SteamIndexTotalsOut
+
+
+class SteamIndexAssetPrefetchIn(BaseModel):
+    app_ids: List[str] = Field(default_factory=list)
+    force_refresh: bool = False
+
+
+class SteamIndexAssetPrefetchOut(BaseModel):
+    total: int
+    processed: int
+    success: int
+    failed: int
+
+
+class SteamIndexIngestRebuildIn(BaseModel):
+    max_items: Optional[int] = None
+    enrich_details: bool = True
+
+
+class SteamIndexIngestRebuildOut(BaseModel):
+    job_id: str
+    processed: int
+    success: int
+    failed: int
+    steamdb_success: int = 0
+    steamdb_failed: int = 0
+    cross_store_success: int = 0
+    cross_store_failed: int = 0
+    started_at: str
+    completed_at: str
+
+
 class AnimeItemOut(BaseModel):
     id: str
     title: str

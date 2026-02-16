@@ -65,6 +65,7 @@ from .routes import (
     self_heal_v2,
     updates_v2,
     cdn_v2,
+    steam_index,
 )
 from .websocket import manager
 from fastapi import WebSocket, WebSocketDisconnect, status, Request, HTTPException
@@ -230,6 +231,7 @@ app.include_router(downloads_v2.router)
 app.include_router(self_heal_v2.router)
 app.include_router(updates_v2.router)
 app.include_router(cdn_v2.router)
+app.include_router(steam_index.router, prefix="/steam/index", tags=["steam-index"])
 
 
 @app.websocket("/ws")
