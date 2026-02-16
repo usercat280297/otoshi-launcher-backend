@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import tempfile
 import time
+import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -459,11 +460,39 @@ def run_first_run_diagnostics(
     requirements: Optional[Dict[str, Any]] = None,
     install_path: Optional[str] = None,
     preload_limit: int = 48,
+    deferred: bool = False,
 ) -> Dict[str, Any]:
     system = run_system_check(requirements=requirements, install_path=install_path)
     health = run_launcher_health_check()
     anticheat = run_anticheat_compatibility_check()
-    preload = preload_catalog_cache(limit=preload_limit)
+    if deferred:
+        preload = {
+            "summary": {
+                "status": "warn",
+                "counts": {"pass": 0, "warn": 1, "fail": 0},
+            },
+            "checks": [
+                {
+                    "id": "catalog_preload",
+                    "status": "warn",
+                    "message": "Catalog preload scheduled in deferred mode.",
+                }
+            ],
+            "appids_total": 0,
+            "warmed_items": 0,
+            "duration_ms": 0,
+            "deferred": True,
+        }
+
+        def _run_preload_background() -> None:
+            try:
+                preload_catalog_cache(limit=preload_limit)
+            except Exception:
+                return
+
+        threading.Thread(target=_run_preload_background, daemon=True).start()
+    else:
+        preload = preload_catalog_cache(limit=preload_limit)
 
     combined_status = _merge_status(
         [
@@ -482,4 +511,3 @@ def run_first_run_diagnostics(
         "preload": preload,
         "ran_at": int(time.time()),
     }
-

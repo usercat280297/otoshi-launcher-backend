@@ -1,5 +1,5 @@
 import logging
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Query
 
 from ..schemas import (
@@ -29,6 +29,60 @@ from ..core.cache import cache_client
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+def _clamp_thumb_width(value: int) -> int:
+    return max(120, min(1024, int(value)))
+
+
+def _build_artwork_tiers(
+    item: Dict[str, Any],
+    mode: str,
+    thumb_w: int,
+) -> Dict[str, Any] | None:
+    if mode == "none":
+        return None
+
+    header = item.get("header_image")
+    capsule = item.get("capsule_image")
+    background = item.get("background") or capsule or header
+    if not any([header, capsule, background]):
+        return None
+
+    _ = _clamp_thumb_width(thumb_w)
+    if mode == "basic":
+        return {
+            "t2": capsule or header,
+            "t3": background or header,
+            "version": 1,
+        }
+
+    return {
+        "t0": capsule or header,
+        "t1": capsule or header,
+        "t2": capsule or header,
+        "t3": background or header,
+        "t4": header or background,
+        "version": 1,
+    }
+
+
+def _inject_artwork(
+    items: List[Dict[str, Any]],
+    mode: str,
+    thumb_w: int,
+) -> List[Dict[str, Any]]:
+    if mode == "none":
+        return items
+
+    enriched: List[Dict[str, Any]] = []
+    for item in items:
+        clone = dict(item)
+        artwork = _build_artwork_tiers(clone, mode, thumb_w)
+        if artwork:
+            clone["artwork"] = artwork
+        enriched.append(clone)
+    return enriched
 
 
 def _build_fallback_detail_from_summary(app_id: str) -> Optional[dict]:
@@ -123,6 +177,8 @@ def catalog(
     offset: int = Query(0, ge=0),
     search: str | None = Query(None),
     sort: str | None = Query(None),
+    art_mode: str = Query("basic", pattern="^(none|basic|tiered)$"),
+    thumb_w: int = Query(460, ge=120, le=1024),
 ):
     appids = get_lua_appids()
     total = len(appids)
@@ -130,6 +186,7 @@ def catalog(
     if search:
         payload = search_catalog(search, appids, limit, offset, sort)
         items = payload.get("items") or []
+        items = _inject_artwork(items, art_mode, thumb_w)
         total = int(payload.get("total") or 0)
         return {
             "total": total,
@@ -140,6 +197,7 @@ def catalog(
 
     page_ids = appids[offset : offset + limit]
     items = get_catalog_page(page_ids)
+    items = _inject_artwork(items, art_mode, thumb_w)
     return {
         "total": total,
         "offset": offset,

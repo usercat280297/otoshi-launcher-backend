@@ -19,6 +19,7 @@ class FirstRunPayload(BaseModel):
     requirements: Optional[Dict[str, Any]] = None
     install_path: Optional[str] = None
     preload_limit: int = Field(default=48, ge=1, le=500)
+    deferred: bool = False
 
 
 @router.get("/system")
@@ -42,5 +43,5 @@ def first_run(payload: FirstRunPayload):
         requirements=payload.requirements,
         install_path=payload.install_path,
         preload_limit=payload.preload_limit,
+        deferred=payload.deferred,
     )
-

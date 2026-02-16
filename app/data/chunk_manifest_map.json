@@ -44,6 +44,13 @@
       "hf_folder": "CODE VEIN II/CODE VEIN II/CODE VEIN II v1.0.2",
       "manifest": "CodeVein2\\manifest_v1.0.2.json"
     },
+    "expedition33": {
+      "folder": "Expedition 33",
+      "game_name": "Expedition 33",
+      "version": "v1.5.1",
+      "hf_folder": "Expedition 33/Expedition 33/Expedition 33 v1.5.1",
+      "manifest": "Expedition 33\\manifest_v1.5.1.json"
+    },
     "footballmanager26": {
       "folder": "football manager 26",
       "game_name": "Football Manager 26",

@@ -26,7 +26,14 @@
       "name": "DENUVO",
       "description": "Games with Denuvo anti-tamper protection",
       "icon": "denuvo",
-      "games": ["1172380", "2050650", "1413480", "1687950", "2215260", "2055290", "2680010", "1817230", "1551360", "1903340", "1382330", "1113000", "990080", "39140", "287700", "1244460", "1874000", "532210", "601150", "594570", "3764200", "2358720", "2215430", "1237320", "1777620", "2486820"]
+      "games": ["1172380", "2050650", "1413480", "1687950", "2215260", "2055290", "2680010", "1817230", "1551360", "1382330", "1113000", "990080", "39140", "287700", "1244460", "1874000", "532210", "601150", "594570", "3764200", "2358720", "2215430", "1237320", "1777620", "2486820", "2513280", "1794960", "1235140", "2072450", "2161700", "1285190", "809890"]
+    },
+    {
+      "id": "other",
+      "name": "OTHER",
+      "description": "Other games and platforms",
+      "icon": "other",
+      "games": ["1903340"]
     }
   ],
   "games": {
@@ -224,10 +231,15 @@
       "name": "Forza Horizon 5",
       "category": "denuvo"
     },
-    "1903340": {
-      "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/Clair%20Obscur%20Expedition%2033%20crack.zip?download=true",
-      "name": "Clair Obscur Expedition 33",
+    "809890": {
+      "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/C.r.ack%20files/Shining.Resonance.Refrain.Crack.Only-voices38.rar?download=true",
+      "name": "Shining Resonance Refrain",
       "category": "denuvo"
+    },
+    "1903340": {
+      "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/C.r.ack%20files/clair%20E33.zip?download=true",
+      "name": "Clair Obscur Expedition 33",
+      "category": "other"
     },
     "1506830": {
       "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/FIFA22%20C.r.ack.rar?download=true",
@@ -302,11 +314,46 @@
     "1777620": {
       "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/C.r.ack%20files/Soul.Hackers.2.HYPERVISOR.Intel.Beta1-KIRIGIRI.rar?download=true",
       "name": "Soul Hackers 2",
+      "note": "Hypervisor Beta Crack - Not recommended for inexperienced users",
       "category": "denuvo"
     },
     "2486820": {
       "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/C.r.ack%20files/Sonic.Racing.CrossWorlds.HYPERVISOR-KIRIGIRI.rar?download=true",
       "name": "Sonic Racing: CrossWorlds",
+      "note": "Hypervisor Beta Crack - Not recommended for inexperienced users",
+      "category": "denuvo"
+    },
+    "2513280": {
+      "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/C.r.ack%20files/SONIC.X.SHADOW.GENERATIONS.HYPERVISOR-KIRIGIRI.rar?download=true",
+      "name": "Sonic X Shadow Generations",
+      "note": "Hypervisor Beta Crack - Not recommended for inexperienced users",
+      "category": "denuvo"
+    },
+    "1794960": {
+      "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/C.r.ack%20files/Sonic.Origins.HYPERVISOR-KIRIGIRI.rar?download=true",
+      "name": "Sonic Origins",
+      "note": "Hypervisor Beta Crack - Not recommended for inexperienced users",
+      "category": "denuvo"
+    },
+    "1235140": {
+      "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/C.r.ack%20files/Yakuza%20like%20a%20dragon_W11%2024H2%20Crackfix.zip?download=true",
+      "name": "Yakuza: Like a Dragon",
+      "category": "denuvo"
+    },
+    "2072450": {
+      "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/C.r.ack%20files/Like.A.Dragon.Infinite.Wealth.HypervisorAMD.BETA1.zip?download=true",
+      "name": "Like a Dragon: Infinite Wealth (AMD Only)",
+      "category": "denuvo"
+    },
+    "2161700": {
+      "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/C.r.ack%20files/Persona.3.Reload.HYPERVISOR.AMD.zip?download=true",
+      "name": "Persona 3 Reload (AMD Only)",
+      "category": "denuvo"
+    },
+    "1285190": {
+      "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/C.r.ack%20files/Borderlands.4.HYPERVISOR-KIRIGIRI.rar?download=true",
+      "name": "Borderlands 4",
+      "note": "Hypervisor Beta Crack - Not recommended for inexperienced users",
       "category": "denuvo"
     }
   }

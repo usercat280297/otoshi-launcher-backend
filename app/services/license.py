@@ -43,7 +43,22 @@ def _load_or_generate_keys() -> tuple[bytes, bytes]:
 
 def get_public_key_pem() -> str:
     _, public_pem = _load_or_generate_keys()
-    return public_pem.decode("ascii")
+    try:
+        return public_pem.decode("ascii")
+    except UnicodeDecodeError:
+        # Recover from accidentally re-encoded key files (BOM/UTF-16) and
+        # normalize back to PEM text expected by API clients.
+        for encoding in ("utf-8-sig", "utf-16", "latin-1"):
+            try:
+                text = public_pem.decode(encoding).strip()
+            except UnicodeDecodeError:
+                continue
+            if "BEGIN PUBLIC KEY" in text and "END PUBLIC KEY" in text:
+                normalized = text.encode("ascii", errors="ignore")
+                if normalized:
+                    PUBLIC_KEY_PATH.write_bytes(normalized)
+                    return normalized.decode("ascii")
+        raise
 
 
 def build_signing_payload(license: License) -> str:

@@ -1,4 +1,425 @@
 {
   "online-fix": {},
-  "bypass": {}
+  "bypass": {
+    "default": {
+      "title": "guide.bypass.default.title",
+      "summary": "guide.bypass.default.summary",
+      "steps": [
+        {
+          "title": "guide.step.download_bypass_files",
+          "description": "guide.step.download_bypass_files_desc"
+        },
+        {
+          "title": "guide.step.locate_game_directory",
+          "description": "guide.step.locate_game_directory_desc"
+        },
+        {
+          "title": "guide.step.apply_crack",
+          "description": "guide.step.apply_crack_desc"
+        }
+      ],
+      "warnings": [
+        "guide.warning.scan_antivirus",
+        "guide.warning.backup",
+        "guide.warning.antivirus_flags"
+      ],
+      "notes": []
+    },
+    "2513280": {
+      "title": "guide.bypass.2513280.title",
+      "summary": "guide.bypass.2513280.summary",
+      "steps": [
+        {
+          "title": "guide.step.prerequisites_check",
+          "description": "guide.step.prerequisites_check_desc"
+        },
+        {
+          "title": "guide.step.system_configuration",
+          "description": "guide.step.system_configuration_desc"
+        },
+        {
+          "title": "guide.step.load_hypervisor_service",
+          "description": "guide.step.load_hypervisor_service_desc"
+        },
+        {
+          "title": "guide.step.start_service",
+          "description": "guide.step.start_service_desc"
+        },
+        {
+          "title": "guide.step.install_game_files",
+          "description": "guide.step.install_game_files_desc"
+        },
+        {
+          "title": "guide.step.stop_service",
+          "description": "guide.step.stop_service_desc"
+        }
+      ],
+      "warnings": [
+        "guide.warning.beta_software",
+        "guide.warning.advanced_users",
+        "guide.warning.conflict_security",
+        "guide.warning.config_prevent"
+      ],
+      "notes": [
+        "guide.note.supports_amd_intel",
+        "guide.note.meltdown_mitigation",
+        "guide.note.dll_files",
+        "guide.note.check_readme"
+      ]
+    },
+    "1794960": {
+      "title": "guide.bypass.1794960.title",
+      "summary": "guide.bypass.1794960.summary",
+      "steps": [
+        {
+          "title": "guide.step.prerequisites_check",
+          "description": "guide.step.prerequisites_check_desc"
+        },
+        {
+          "title": "guide.step.system_configuration",
+          "description": "guide.step.system_configuration_desc"
+        },
+        {
+          "title": "guide.step.load_hypervisor_service",
+          "description": "guide.step.load_hypervisor_service_desc"
+        },
+        {
+          "title": "guide.step.start_service",
+          "description": "guide.step.start_service_desc"
+        },
+        {
+          "title": "guide.step.install_game_files",
+          "description": "guide.step.install_game_files_desc"
+        },
+        {
+          "title": "guide.step.stop_service",
+          "description": "guide.step.stop_service_desc"
+        }
+      ],
+      "warnings": [
+        "guide.warning.beta_software",
+        "guide.warning.advanced_users",
+        "guide.warning.conflict_security",
+        "guide.warning.config_prevent"
+      ],
+      "notes": [
+        "guide.note.requires_intel_8gen",
+        "guide.note.meltdown_mitigation",
+        "guide.note.dll_files",
+        "guide.note.check_readme"
+      ]
+    },
+    "2486820": {
+      "title": "guide.bypass.2486820.title",
+      "summary": "guide.bypass.2486820.summary",
+      "steps": [
+        {
+          "title": "guide.step.prerequisites_check",
+          "description": "guide.step.prerequisites_check_desc"
+        },
+        {
+          "title": "guide.step.system_configuration",
+          "description": "guide.step.system_configuration_desc"
+        },
+        {
+          "title": "guide.step.load_hypervisor_service",
+          "description": "guide.step.load_hypervisor_service_desc"
+        },
+        {
+          "title": "guide.step.start_service",
+          "description": "guide.step.start_service_desc"
+        },
+        {
+          "title": "guide.step.install_game_files",
+          "description": "guide.step.install_game_files_desc"
+        },
+        {
+          "title": "guide.step.stop_service",
+          "description": "guide.step.stop_service_desc"
+        }
+      ],
+      "warnings": [
+        "guide.warning.beta_software",
+        "guide.warning.advanced_users",
+        "guide.warning.conflict_security",
+        "guide.warning.config_prevent"
+      ],
+      "notes": [
+        "guide.note.supports_amd_intel",
+        "guide.note.meltdown_mitigation",
+        "guide.note.dll_files",
+        "guide.note.check_readme"
+      ]
+    },
+    "1285190": {
+      "title": "guide.bypass.1285190.title",
+      "summary": "guide.bypass.1285190.summary",
+      "steps": [
+        {
+          "title": "guide.step.prerequisites_check",
+          "description": "guide.step.prerequisites_check_desc"
+        },
+        {
+          "title": "guide.step.system_configuration",
+          "description": "guide.step.system_configuration_desc"
+        },
+        {
+          "title": "guide.step.load_hypervisor_service",
+          "description": "guide.step.load_hypervisor_service_desc"
+        },
+        {
+          "title": "guide.step.start_service",
+          "description": "guide.step.start_service_desc"
+        },
+        {
+          "title": "guide.step.install_game_files",
+          "description": "guide.step.install_game_files_desc"
+        },
+        {
+          "title": "guide.step.stop_service",
+          "description": "guide.step.stop_service_desc"
+        }
+      ],
+      "warnings": [
+        "guide.warning.beta_software",
+        "guide.warning.advanced_users",
+        "guide.warning.conflict_security",
+        "guide.warning.config_prevent"
+      ],
+      "notes": [
+        "guide.note.supports_amd_intel",
+        "guide.note.meltdown_mitigation",
+        "guide.note.dll_files",
+        "guide.note.check_readme"
+      ]
+    },
+    "2358720": {
+      "title": "guide.bypass.2358720.title",
+      "summary": "guide.bypass.2358720.summary",
+      "steps": [
+        {
+          "title": "guide.step.copy_crack_folder",
+          "description": "guide.step.copy_crack_folder_desc"
+        },
+        {
+          "title": "guide.step.enable_vtx_svm",
+          "description": "guide.step.enable_vtx_svm_desc"
+        },
+        {
+          "title": "guide.step.disable_secure_boot",
+          "description": "guide.step.disable_secure_boot_desc"
+        },
+        {
+          "title": "guide.step.launch_game",
+          "description": "guide.step.launch_game_desc"
+        }
+      ],
+      "warnings": [
+        "guide.warning.bios_changes",
+        "guide.warning.restart",
+        "guide.warning.b1launcher_only"
+      ],
+      "notes": [
+        "guide.note.b1launcher_check",
+        "guide.note.restart_requirement",
+        "guide.note.crack_folder_copy"
+      ]
+    },
+    "1777620": {
+      "title": "guide.bypass.1777620.title",
+      "summary": "guide.bypass.1777620.summary",
+      "steps": [
+        {
+          "title": "guide.step.prerequisites_check",
+          "description": "guide.step.prerequisites_check_desc"
+        },
+        {
+          "title": "guide.step.system_configuration",
+          "description": "guide.step.system_configuration_desc"
+        },
+        {
+          "title": "guide.step.load_hypervisor_service",
+          "description": "guide.step.load_hypervisor_service_desc"
+        },
+        {
+          "title": "guide.step.start_service",
+          "description": "guide.step.start_service_desc"
+        },
+        {
+          "title": "guide.step.install_game_files",
+          "description": "guide.step.install_game_files_desc"
+        },
+        {
+          "title": "guide.step.stop_service",
+          "description": "guide.step.stop_service_desc"
+        }
+      ],
+      "warnings": [
+        "guide.warning.beta_software",
+        "guide.warning.advanced_users",
+        "guide.warning.conflict_security",
+        "guide.warning.config_prevent"
+      ],
+      "notes": [
+        "guide.note.optimized_intel_8gen",
+        "guide.note.meltdown_mitigation",
+        "guide.note.dll_files",
+        "guide.note.check_readme"
+      ]
+    },
+    "1235140": {
+      "title": "guide.bypass.1235140.title",
+      "summary": "guide.bypass.1235140.summary",
+      "steps": [
+        {
+          "title": "guide.step.prerequisites_check",
+          "description": "guide.step.prerequisites_check_desc"
+        },
+        {
+          "title": "guide.step.system_configuration",
+          "description": "guide.step.system_configuration_desc"
+        },
+        {
+          "title": "guide.step.load_hypervisor_service",
+          "description": "guide.step.load_hypervisor_service_desc"
+        },
+        {
+          "title": "guide.step.start_service",
+          "description": "guide.step.start_service_desc"
+        },
+        {
+          "title": "guide.step.install_game_files",
+          "description": "guide.step.install_game_files_desc"
+        },
+        {
+          "title": "guide.step.stop_service",
+          "description": "guide.step.stop_service_desc"
+        }
+      ],
+      "warnings": [
+        "guide.warning.beta_software",
+        "guide.warning.advanced_users",
+        "guide.warning.conflict_security",
+        "guide.warning.config_prevent"
+      ],
+      "notes": [
+        "guide.note.supports_amd_intel",
+        "guide.note.meltdown_mitigation",
+        "guide.note.dll_files",
+        "guide.note.check_readme"
+      ]
+    },
+    "2072450": {
+      "title": "guide.bypass.2072450.title",
+      "summary": "guide.bypass.2072450.summary",
+      "steps": [
+        {
+          "title": "guide.step.prerequisites_check",
+          "description": "guide.step.prerequisites_check_desc"
+        },
+        {
+          "title": "guide.step.system_configuration",
+          "description": "guide.step.system_configuration_desc"
+        },
+        {
+          "title": "guide.step.load_hypervisor_service",
+          "description": "guide.step.load_hypervisor_service_desc"
+        },
+        {
+          "title": "guide.step.start_service",
+          "description": "guide.step.start_service_desc"
+        },
+        {
+          "title": "guide.step.install_game_files",
+          "description": "guide.step.install_game_files_desc"
+        },
+        {
+          "title": "guide.step.stop_service",
+          "description": "guide.step.stop_service_desc"
+        }
+      ],
+      "warnings": [
+        "guide.warning.beta_software",
+        "guide.warning.advanced_users",
+        "guide.warning.conflict_security",
+        "guide.warning.config_prevent"
+      ],
+      "notes": [
+        "guide.note.supports_amd_intel",
+        "guide.note.meltdown_mitigation",
+        "guide.note.dll_files",
+        "guide.note.check_readme"
+      ]
+    },
+    "2161700": {
+      "title": "guide.bypass.2161700.title",
+      "summary": "guide.bypass.2161700.summary",
+      "steps": [
+        {
+          "title": "guide.step.prerequisites_check",
+          "description": "guide.step.prerequisites_check_desc"
+        },
+        {
+          "title": "guide.step.system_configuration",
+          "description": "guide.step.system_configuration_desc"
+        },
+        {
+          "title": "guide.step.load_hypervisor_service",
+          "description": "guide.step.load_hypervisor_service_desc"
+        },
+        {
+          "title": "guide.step.start_service",
+          "description": "guide.step.start_service_desc"
+        },
+        {
+          "title": "guide.step.install_game_files",
+          "description": "guide.step.install_game_files_desc"
+        },
+        {
+          "title": "guide.step.stop_service",
+          "description": "guide.step.stop_service_desc"
+        }
+      ],
+      "warnings": [
+        "guide.warning.beta_software",
+        "guide.warning.advanced_users",
+        "guide.warning.conflict_security",
+        "guide.warning.config_prevent"
+      ],
+      "notes": [
+        "guide.note.supports_amd_intel",
+        "guide.note.meltdown_mitigation",
+        "guide.note.dll_files",
+        "guide.note.check_readme"
+      ]
+    },
+    "809890": {
+      "title": "guide.bypass.809890.title",
+      "summary": "guide.bypass.809890.summary",
+      "steps": [
+        {
+          "title": "guide.step.download_bypass_files",
+          "description": "guide.step.download_bypass_files_desc"
+        },
+        {
+          "title": "guide.step.download_bypass_extract",
+          "description": "guide.step.download_bypass_extract_desc"
+        },
+        {
+          "title": "guide.step.copy_to_game_folder",
+          "description": "guide.step.copy_to_game_folder_desc"
+        },
+        {
+          "title": "guide.step.launch_game_standard",
+          "description": "guide.step.launch_game_standard_desc"
+        }
+      ],
+      "warnings": [
+        "guide.warning.scan_antivirus",
+        "guide.warning.backup",
+        "guide.warning.antivirus_flags"
+      ],
+      "notes": []
+    }
+  }
 }

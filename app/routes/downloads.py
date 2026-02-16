@@ -302,7 +302,18 @@ def prepare_steam_download(
         raise HTTPException(status_code=404, detail="Steam app not found")
     method = payload.method
     if method and not method_available(method, options.get("methods")):
-        raise HTTPException(status_code=400, detail="Download method unavailable")
+        blocked_method = next(
+            (item for item in options.get("methods", []) if item.get("id") == method),
+            {},
+        )
+        availability_code = blocked_method.get("availability_code") or "method_unavailable"
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": "Download method unavailable",
+                "code": availability_code,
+            },
+        )
     install_path = ensure_install_directory(
         payload.install_path,
         options["name"],
@@ -361,7 +372,18 @@ def start_steam_download_with_options(
         
         if payload.method and not method_available(payload.method, options.get("methods")):
             log_download_attempt(current_user.id, app_id, False, "Invalid download method")
-            raise HTTPException(status_code=400, detail="Download method unavailable")
+            blocked_method = next(
+                (item for item in options.get("methods", []) if item.get("id") == payload.method),
+                {},
+            )
+            availability_code = blocked_method.get("availability_code") or "method_unavailable"
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "message": "Download method unavailable",
+                    "code": availability_code,
+                },
+            )
         
         install_path = ensure_install_directory(
             payload.install_path,

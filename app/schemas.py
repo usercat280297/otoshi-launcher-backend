@@ -182,6 +182,15 @@ class SteamPriceOut(BaseModel):
     final_formatted: Optional[str] = None
 
 
+class SteamArtworkOut(BaseModel):
+    t0: Optional[str] = None
+    t1: Optional[str] = None
+    t2: Optional[str] = None
+    t3: Optional[str] = None
+    t4: Optional[str] = None
+    version: Optional[int] = None
+
+
 class SteamCatalogItemOut(BaseModel):
     app_id: str
     name: str
@@ -189,6 +198,7 @@ class SteamCatalogItemOut(BaseModel):
     header_image: Optional[str] = None
     capsule_image: Optional[str] = None
     background: Optional[str] = None
+    artwork: Optional[SteamArtworkOut] = None
     required_age: Optional[int] = None
     price: Optional[SteamPriceOut] = None
     genres: Optional[List[str]] = None
@@ -390,6 +400,8 @@ class DownloadMethodOut(BaseModel):
     recommended: bool = False
     enabled: bool = True
     note: Optional[str] = None
+    note_key: Optional[str] = None
+    availability_code: Optional[str] = None
 
 
 class DownloadVersionOut(BaseModel):

@@ -182,10 +182,18 @@ def list_download_versions(app_id: str, release_date: Optional[str]) -> list[dic
     return [{"id": "latest", "label": label, "is_latest": True, "size_bytes": None}]
 
 
-def _hf_unavailable_reason(has_manifest: bool) -> Optional[str]:
+def _hf_unavailable_code(has_manifest: bool) -> Optional[str]:
     if not HF_REPO_ID:
-        return "Hugging Face repo not configured"
+        return "hf_repo_not_configured"
     if not has_manifest:
+        return "hf_manifest_missing"
+    return None
+
+
+def _hf_unavailable_reason(availability_code: Optional[str]) -> Optional[str]:
+    if availability_code == "hf_repo_not_configured":
+        return "Hugging Face repo not configured"
+    if availability_code == "hf_manifest_missing":
         return "No remote manifest (repo private or token missing)"
     return None
 
@@ -201,14 +209,20 @@ def _aria2_available() -> bool:
 
 def list_download_methods(has_manifest: bool) -> list[dict]:
     hf_enabled = bool(HF_REPO_ID and huggingface_fetcher.enabled() and has_manifest)
-    hf_note = None if hf_enabled else _hf_unavailable_reason(has_manifest)
+    hf_code = None if hf_enabled else _hf_unavailable_code(has_manifest)
+    hf_note = None if hf_enabled else _hf_unavailable_reason(hf_code)
     aria2_enabled = _aria2_available()
+    aria2_code = None if aria2_enabled else "aria2_missing"
     aria2_note = None if aria2_enabled else "aria2c not found on client PATH"
     auto_note_parts = []
+    auto_note_keys = []
     if not aria2_enabled:
         auto_note_parts.append("aria2c unavailable, fallback to internal downloader")
+        auto_note_keys.append("aria2_missing")
     if not hf_enabled:
         auto_note_parts.append("HF chunks unavailable, fallback to direct CDN")
+        if hf_code:
+            auto_note_keys.append(hf_code)
     auto_note = "; ".join(auto_note_parts) if auto_note_parts else None
     methods = [
         {
@@ -218,6 +232,8 @@ def list_download_methods(has_manifest: bool) -> list[dict]:
             "recommended": True,
             "enabled": True,
             "note": auto_note,
+            "note_key": "auto_fallback_notice" if auto_note_keys else None,
+            "availability_code": auto_note_keys[0] if auto_note_keys else None,
         },
         {
             "id": "hf_chunks",
@@ -226,6 +242,8 @@ def list_download_methods(has_manifest: bool) -> list[dict]:
             "recommended": False,
             "enabled": hf_enabled,
             "note": hf_note,
+            "note_key": hf_code,
+            "availability_code": hf_code,
         },
         {
             "id": "cdn_direct",
@@ -233,6 +251,8 @@ def list_download_methods(has_manifest: bool) -> list[dict]:
             "description": "Single-stream download from the primary CDN.",
             "recommended": False,
             "enabled": True,
+            "note_key": None,
+            "availability_code": None,
         },
         {
             "id": "aria2c",
@@ -241,6 +261,8 @@ def list_download_methods(has_manifest: bool) -> list[dict]:
             "recommended": False,
             "enabled": aria2_enabled,
             "note": aria2_note,
+            "note_key": aria2_code,
+            "availability_code": aria2_code,
         },
     ]
     return methods
