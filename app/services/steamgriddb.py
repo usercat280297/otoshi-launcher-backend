@@ -325,11 +325,31 @@ def _normalize_assets_payload(
     assets: Optional[dict[str, Optional[str]]] = None,
 ) -> dict[str, Optional[str]]:
     fallback = build_steam_fallback_assets(steam_app_id)
+    grid = (assets or {}).get("grid") or fallback.get("grid") or fallback.get("hero")
+    hero = (assets or {}).get("hero") or fallback.get("hero") or grid
+    logo = (assets or {}).get("logo") or (assets or {}).get("icon") or fallback.get("logo")
+    raw_icon = (assets or {}).get("icon")
+    if raw_icon and steam_app_id:
+        marker = f"/steam/apps/{steam_app_id}/icon.jpg"
+        lower_icon = raw_icon.lower()
+        if marker in lower_icon and any(
+            value and "steamgriddb.com" in value.lower()
+            for value in (logo, grid, hero)
+        ):
+            raw_icon = None
+    icon = (
+        raw_icon
+        or (assets or {}).get("logo")
+        or grid
+        or hero
+        or fallback.get("icon")
+        or fallback.get("logo")
+    )
     merged = {
-        "grid": (assets or {}).get("grid") or fallback.get("grid"),
-        "hero": (assets or {}).get("hero") or fallback.get("hero"),
-        "logo": (assets or {}).get("logo") or fallback.get("logo"),
-        "icon": (assets or {}).get("icon") or fallback.get("icon"),
+        "grid": grid,
+        "hero": hero,
+        "logo": logo,
+        "icon": icon,
     }
     return {
         "game_id": int((assets or {}).get("game_id") or 0),
@@ -355,14 +375,19 @@ def get_cached_assets(steam_app_id: str) -> Optional[dict[str, Optional[str]]]:
                 return None
             if entry.expires_at and entry.expires_at < datetime.utcnow():
                 return None
-            return {
-                "game_id": entry.sgdb_game_id or 0,
-                "name": entry.title or steam_app_id,
-                "grid": entry.grid_url,
-                "hero": entry.hero_url,
-                "logo": entry.logo_url,
-                "icon": entry.icon_url,
-            }
+            payload = _normalize_assets_payload(
+                steam_app_id=steam_app_id,
+                title=entry.title or steam_app_id,
+                assets={
+                    "game_id": entry.sgdb_game_id or 0,
+                    "grid": entry.grid_url,
+                    "hero": entry.hero_url,
+                    "logo": entry.logo_url,
+                    "icon": entry.icon_url,
+                },
+            )
+            payload["game_id"] = entry.sgdb_game_id or 0
+            return payload
     except Exception:
         return None
 
@@ -467,11 +492,31 @@ def resolve_assets(steam_app_id: Optional[str], title: Optional[str]) -> dict[st
 
     assets = fetch_assets(int(game["id"]))
     fallback = build_steam_fallback_assets(steam_app_id)
+    grid = assets.get("grid") or fallback.get("grid") or fallback.get("hero")
+    hero = assets.get("hero") or fallback.get("hero") or grid
+    logo = assets.get("logo") or assets.get("icon") or fallback.get("logo")
+    raw_icon = assets.get("icon")
+    if raw_icon and steam_app_id:
+        marker = f"/steam/apps/{steam_app_id}/icon.jpg"
+        lower_icon = raw_icon.lower()
+        if marker in lower_icon and any(
+            value and "steamgriddb.com" in value.lower()
+            for value in (logo, grid, hero)
+        ):
+            raw_icon = None
+    icon = (
+        raw_icon
+        or assets.get("logo")
+        or grid
+        or hero
+        or fallback.get("icon")
+        or fallback.get("logo")
+    )
     merged = {
-        "grid": assets.get("grid") or fallback.get("grid"),
-        "hero": assets.get("hero") or fallback.get("hero"),
-        "logo": assets.get("logo") or fallback.get("logo"),
-        "icon": assets.get("icon") or fallback.get("icon"),
+        "grid": grid,
+        "hero": hero,
+        "logo": logo,
+        "icon": icon,
     }
     result = {
         "game_id": int(game["id"]),

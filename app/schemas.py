@@ -204,6 +204,11 @@ class SteamCatalogItemOut(BaseModel):
     genres: Optional[List[str]] = None
     release_date: Optional[str] = None
     platforms: Optional[List[str]] = None
+    item_type: Optional[str] = None
+    is_dlc: Optional[bool] = None
+    is_base_game: Optional[bool] = None
+    classification_confidence: Optional[float] = None
+    artwork_coverage: Optional[str] = None
     denuvo: Optional[bool] = None
 
 
@@ -222,6 +227,7 @@ class SteamGameDetailOut(SteamCatalogItemOut):
     recommendations: Optional[int] = None
     website: Optional[str] = None
     support_info: Optional[dict] = None
+    content_locale: Optional[str] = None
 
 
 class SteamCatalogOut(BaseModel):
@@ -248,6 +254,9 @@ class SteamIndexIngestLatestJobOut(BaseModel):
     started_at: Optional[str] = None
     completed_at: Optional[str] = None
     error_message: Optional[str] = None
+    phase: Optional[str] = None
+    cursor: Optional[str] = None
+    resume_token: Optional[str] = None
     external_enrichment: dict = Field(default_factory=dict)
 
 
@@ -263,6 +272,29 @@ class SteamIndexIngestStatusOut(BaseModel):
     totals: SteamIndexTotalsOut
 
 
+class SteamIndexCoverageOut(BaseModel):
+    titles_total: int = 0
+    metadata_complete: int = 0
+    assets_complete: int = 0
+    cross_store_complete: int = 0
+    absolute_complete: int = 0
+
+
+class SteamIndexClassificationOut(BaseModel):
+    app_id: str
+    item_type: Optional[str] = None
+    is_dlc: bool = False
+    is_base_game: bool = False
+    confidence: float = 0.0
+
+
+class SteamIndexRankingOut(BaseModel):
+    total: int
+    offset: int
+    limit: int
+    items: List[SteamCatalogItemOut]
+
+
 class SteamIndexAssetPrefetchIn(BaseModel):
     app_ids: List[str] = Field(default_factory=list)
     force_refresh: bool = False
@@ -275,9 +307,38 @@ class SteamIndexAssetPrefetchOut(BaseModel):
     failed: int
 
 
+class SteamIndexAssetBatchOut(BaseModel):
+    items: dict = Field(default_factory=dict)
+
+
 class SteamIndexIngestRebuildIn(BaseModel):
     max_items: Optional[int] = None
     enrich_details: bool = True
+
+
+class SteamIndexIngestFullIn(BaseModel):
+    max_items: Optional[int] = None
+
+
+class SteamIndexIngestResumeIn(BaseModel):
+    resume_token: Optional[str] = None
+    max_items: Optional[int] = None
+
+
+class SteamIndexCompletionIn(BaseModel):
+    app_ids: List[str] = Field(default_factory=list)
+    max_items: Optional[int] = None
+
+
+class SteamIndexCompletionOut(BaseModel):
+    processed: int = 0
+    failed: int = 0
+    metadata_created: int = 0
+    metadata_updated: int = 0
+    assets_created: int = 0
+    assets_updated: int = 0
+    cross_store_created: int = 0
+    cross_store_updated: int = 0
 
 
 class SteamIndexIngestRebuildOut(BaseModel):
@@ -289,6 +350,8 @@ class SteamIndexIngestRebuildOut(BaseModel):
     steamdb_failed: int = 0
     cross_store_success: int = 0
     cross_store_failed: int = 0
+    completion_processed: int = 0
+    completion_failed: int = 0
     started_at: str
     completed_at: str
 

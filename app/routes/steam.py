@@ -11,7 +11,14 @@ from ..schemas import (
     SteamCatalogOut,
     SteamGameDetailOut,
 )
-from ..services.settings import add_search_history, clear_search_history, get_search_history
+from ..services.settings import (
+    add_search_history,
+    clear_search_history,
+    detect_system_locale,
+    get_search_history,
+    get_user_locale,
+    normalize_locale,
+)
 from ..services.steam_catalog import (
     get_catalog_page,
     get_lua_appids,
@@ -38,6 +45,54 @@ from ..core.cache import cache_client
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+_LOCALIZED_DETAIL_FIELDS = (
+    "name",
+    "short_description",
+    "about_the_game",
+    "about_the_game_html",
+    "detailed_description",
+    "detailed_description_html",
+    "genres",
+    "categories",
+    "developers",
+    "publishers",
+    "release_date",
+    "platforms",
+    "required_age",
+    "item_type",
+    "is_dlc",
+    "dlc_count",
+)
+
+
+def _resolve_content_locale(preferred: str | None) -> str:
+    if preferred:
+        return normalize_locale(preferred)
+    user_locale = get_user_locale()
+    if user_locale:
+        return normalize_locale(user_locale)
+    return normalize_locale(detect_system_locale())
+
+
+def _merge_localized_detail(base: dict, localized: dict | None, resolved_locale: str) -> dict:
+    if not isinstance(base, dict):
+        return base
+    if not isinstance(localized, dict):
+        base["content_locale"] = resolved_locale
+        return base
+    merged = dict(base)
+    for field in _LOCALIZED_DETAIL_FIELDS:
+        value = localized.get(field)
+        if value is None:
+            continue
+        if isinstance(value, str) and not value.strip():
+            continue
+        if isinstance(value, list) and not value:
+            continue
+        merged[field] = value
+    merged["content_locale"] = localized.get("content_locale") or resolved_locale
+    return merged
 
 
 def _clamp_thumb_width(value: int) -> int:
@@ -298,7 +353,7 @@ def popular(
             db=db,
             limit=limit,
             offset=offset,
-            sort="recent",
+            sort="priority",
             scope="all",
         )
         lua_total = len(get_lua_appids())
@@ -321,20 +376,28 @@ def popular(
 
 
 @router.get("/games/{app_id}", response_model=SteamGameDetailOut)
-def game_detail(app_id: str, db: Session = Depends(get_db)):
+def game_detail(
+    app_id: str,
+    locale: str | None = Query(None),
+    db: Session = Depends(get_db),
+):
+    resolved_locale = _resolve_content_locale(locale)
     if GLOBAL_INDEX_V1:
         detail = get_global_index_title_detail(db, app_id)
         if detail:
-            return detail
+            localized = get_steam_detail(app_id, locale=resolved_locale)
+            return _merge_localized_detail(detail, localized, resolved_locale)
         # Global index can be empty before first ingest; fall through to legacy path.
 
-    detail = get_steam_detail(app_id)
+    detail = get_steam_detail(app_id, locale=resolved_locale)
     if not detail:
         detail = _build_fallback_detail_from_summary(app_id)
     if not detail:
         detail = _build_fallback_detail_from_download_options(app_id)
     if not detail:
         raise HTTPException(status_code=404, detail="Steam app not found")
+    if isinstance(detail, dict):
+        detail["content_locale"] = detail.get("content_locale") or resolved_locale
     return detail
 
 

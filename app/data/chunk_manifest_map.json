@@ -121,6 +121,13 @@
       "hf_folder": "YakuzaKiwami3/YakuzaKiwami3/YakuzaKiwami3 v1.11",
       "manifest": "YakuzaKiwami3\\manifest_v1.11.json"
     },
+    "yakuzalikeadragon": {
+      "folder": "Yakuza Like a Dragon",
+      "game_name": "Yakuza Like a Dragon",
+      "version": "v2.8",
+      "hf_folder": "Yakuza Like a Dragon/Yakuza Like a Dragon/Yakuza Like a Dragon v2.8",
+      "manifest": "Yakuza Like a Dragon\\manifest.json"
+    },
     "yugiohmasterduel": {
       "folder": "Yu-gi-oh! master duel",
       "game_name": "Yu-Gi-Oh!  Master Duel",

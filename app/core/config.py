@@ -60,7 +60,33 @@ def _split_env_list(value: str) -> set[str]:
             items.append(cleaned.lower())
     return set(items)
 
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./otoshi.db")
+def _default_database_url() -> str:
+    explicit_path = os.getenv("OTOSHI_DB_PATH", "").strip()
+    if explicit_path:
+        return f"sqlite:///{Path(explicit_path).as_posix()}"
+
+    runtime_mode = os.getenv("OTOSHI_RUNTIME_MODE", "installer").strip().lower() or "installer"
+    if getattr(sys, "frozen", False):
+        exe_dir = Path(sys.executable).resolve().parent
+        if runtime_mode == "portable":
+            portable_db = (exe_dir / "data" / "cache" / "otoshi.db").resolve()
+            return f"sqlite:///{portable_db.as_posix()}"
+
+        program_data = os.getenv("ProgramData", "").strip()
+        if program_data:
+            installer_db = (Path(program_data) / "Otoshi" / "cache" / "otoshi.db").resolve()
+            return f"sqlite:///{installer_db.as_posix()}"
+
+        fallback_db = (exe_dir / "cache" / "otoshi.db").resolve()
+        return f"sqlite:///{fallback_db.as_posix()}"
+
+    current = Path(__file__).resolve()
+    backend_root = current.parents[2]
+    dev_db = (backend_root / "otoshi.db").resolve()
+    return f"sqlite:///{dev_db.as_posix()}"
+
+
+DATABASE_URL = os.getenv("DATABASE_URL", _default_database_url())
 SECRET_KEY = os.getenv("SECRET_KEY", "change-me-in-prod")
 ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
@@ -200,6 +226,25 @@ STEAM_GLOBAL_INDEX_MAX_PREFETCH = int(os.getenv("STEAM_GLOBAL_INDEX_MAX_PREFETCH
 STEAM_GLOBAL_INDEX_EPIC_CONFIDENCE_THRESHOLD = float(
     os.getenv("STEAM_GLOBAL_INDEX_EPIC_CONFIDENCE_THRESHOLD", "0.86")
 )
+STEAM_GLOBAL_INDEX_ENFORCE_COMPLETE = os.getenv(
+    "STEAM_GLOBAL_INDEX_ENFORCE_COMPLETE", "true"
+).lower() in (
+    "1",
+    "true",
+    "yes",
+    "on",
+)
+STEAM_GLOBAL_INDEX_COMPLETION_BATCH = int(
+    os.getenv("STEAM_GLOBAL_INDEX_COMPLETION_BATCH", "0")
+)
+STEAM_GO_CRAWLER_ENABLED = os.getenv("STEAM_GO_CRAWLER_ENABLED", "false").lower() in (
+    "1",
+    "true",
+    "yes",
+    "on",
+)
+STEAM_GO_CRAWLER_BIN = os.getenv("STEAM_GO_CRAWLER_BIN", "")
+STEAM_GO_CRAWLER_TIMEOUT_SECONDS = int(os.getenv("STEAM_GO_CRAWLER_TIMEOUT_SECONDS", "30"))
 STEAMDB_ENRICHMENT_ENABLED = os.getenv("STEAMDB_ENRICHMENT_ENABLED", "true").lower() in (
     "1",
     "true",

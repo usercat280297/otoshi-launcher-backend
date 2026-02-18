@@ -1,13 +1,16 @@
 from pathlib import Path
 import os
 import sys
+from urllib.parse import unquote
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 import threading
 
 from .core.config import (
+    DATABASE_URL,
     CORS_ORIGINS,
+    GLOBAL_INDEX_V1,
     WORKSHOP_STORAGE_DIR,
     SCREENSHOT_STORAGE_DIR,
     BUILD_STORAGE_DIR,
@@ -23,6 +26,7 @@ from .migrations import ensure_schema
 from .seed import seed_games
 from .services.steam_catalog import get_lua_appids
 from .services.steamgriddb import prewarm_steamgriddb_cache
+from .services.steam_global_index import get_ingest_status
 from .routes import (
     auth,
     games,
@@ -188,6 +192,55 @@ def health_check():
 @app.head("/health")
 def health_check_head():
     return Response(status_code=200)
+
+
+def _resolve_runtime_db_path(database_url: str) -> str | None:
+    if not database_url.lower().startswith("sqlite:///"):
+        return None
+    try:
+        raw = database_url[len("sqlite:///") :]
+        decoded = unquote(raw)
+        # Normalize URLs like /C:/path on Windows to C:/path.
+        if decoded.startswith("/") and len(decoded) >= 3 and decoded[2] == ":":
+            decoded = decoded[1:]
+        return str(Path(decoded))
+    except Exception:
+        return None
+
+
+@app.get("/health/runtime")
+def health_runtime():
+    db_path = _resolve_runtime_db_path(DATABASE_URL)
+    ingest_status = {}
+    ingest_state = "idle"
+    last_error = None
+    try:
+        with SessionLocal() as db:
+            ingest_status = get_ingest_status(db)
+            ingest_state = (
+                str((ingest_status.get("latest_job") or {}).get("status") or "idle").strip()
+                or "idle"
+            )
+            last_error = (ingest_status.get("latest_job") or {}).get("error_message")
+    except Exception as exc:
+        ingest_state = "error"
+        last_error = str(exc)
+
+    index_mode = os.getenv("OTOSHI_INDEX_MODE", "hybrid").strip().lower() or "hybrid"
+    runtime_mode = os.getenv("OTOSHI_RUNTIME_MODE", "installer").strip().lower() or "installer"
+
+    return {
+        "status": "ok",
+        "sidecar_ready": True,
+        "runtime_mode": runtime_mode,
+        "index_mode": index_mode,
+        "global_index_v1": bool(GLOBAL_INDEX_V1),
+        "db_path": db_path,
+        "db_exists": bool(db_path and Path(db_path).exists()),
+        "ingest_state": ingest_state,
+        "ingest_status": ingest_status,
+        "last_error": last_error,
+    }
 
 
 app.include_router(auth.router, prefix="/auth", tags=["auth"])

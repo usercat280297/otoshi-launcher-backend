@@ -5,6 +5,33 @@
 !render.yaml
 !app/
 !app/**
+!scripts/
+scripts/*
+!scripts/publish_launcher_artifacts.py
+!native/
+native/*
+!native/README.md
+!native/go/
+native/go/*
+!native/go/steam_crawler/
+native/go/steam_crawler/*
+!native/go/steam_crawler/main.go
+!native/go/steam_crawler/go.mod
+!native/c/
+native/c/*
+!native/c/crypto_helper/
+native/c/crypto_helper/*
+!native/c/crypto_helper/otoshi_crypto_helper.c
+!native/cpp/
+native/cpp/*
+!native/cpp/fs_scanner/
+native/cpp/fs_scanner/*
+!native/cpp/fs_scanner/otoshi_fs_scanner.cpp
+!native/asm/
+native/asm/*
+!native/asm/hash_compare/
+native/asm/hash_compare/*
+!native/asm/hash_compare/otoshi_hash_compare_x64.asm
 
 # Re-ignore generated files inside app
 app/**/__pycache__/

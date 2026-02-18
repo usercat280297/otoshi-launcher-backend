@@ -32,6 +32,7 @@ from ..core.config import (
     STEAM_WEB_API_URL,
 )
 from ..services.remote_game_data import get_lua_appids_from_server
+from ..services.settings import normalize_locale as normalize_ui_locale
 
 TAG_RE = re.compile(r"<[^>]+>")
 MEDIA_VERSION = 7
@@ -105,6 +106,10 @@ _CHUNK_MANIFEST_MAP_FILE = Path(__file__).resolve().parents[1] / "data" / "chunk
 _MANIFEST_NAME_MAP_LOCK = threading.Lock()
 _MANIFEST_NAME_MAP_SIGNATURE: Optional[str] = None
 _MANIFEST_NAME_MAP: Dict[str, str] = {}
+_CONTENT_LOCALE_TO_STEAM_LANGUAGE: Dict[str, str] = {
+    "en": "english",
+    "vi": "vietnamese",
+}
 
 
 def _load_native_movie_builder():
@@ -228,12 +233,32 @@ def _request(url: str, params: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         return None
 
 
-def _store_appdetails(appids: Iterable[str], filters: Optional[str] = None) -> Dict[str, Any]:
+def normalize_content_locale(locale: Optional[str]) -> str:
+    return normalize_ui_locale(locale)
+
+
+def _steam_language_for_locale(locale: Optional[str]) -> str:
+    normalized = normalize_content_locale(locale)
+    return _CONTENT_LOCALE_TO_STEAM_LANGUAGE.get(normalized, "english")
+
+
+def _detail_cache_key(appid: str, locale: Optional[str]) -> str:
+    normalized = normalize_content_locale(locale)
+    if normalized == "en":
+        return f"steam:detail:{appid}"
+    return f"steam:detail:{appid}:locale:{normalized}"
+
+
+def _store_appdetails(
+    appids: Iterable[str],
+    filters: Optional[str] = None,
+    language: str = "english",
+) -> Dict[str, Any]:
     url = f"{STEAM_STORE_API_URL.rstrip('/')}/appdetails"
     params = {
         "appids": ",".join(appids),
         "cc": "us",
-        "l": "en",
+        "l": language,
     }
     if filters:
         params["filters"] = filters
@@ -426,6 +451,8 @@ def _fallback_summary_for_appid(appid: str) -> Dict[str, Any]:
         "platforms": ["windows"],
         "required_age": None,
         "dlc_count": 0,
+        "item_type": None,
+        "is_dlc": False,
         "denuvo": str(appid) in DENUVO_APP_ID_SET,
     }
 
@@ -433,6 +460,8 @@ def _fallback_summary_for_appid(appid: str) -> Dict[str, Any]:
 def _summary_from_payload(appid: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     dlc_raw = payload.get("dlc") or []
     dlc_count = len(dlc_raw) if isinstance(dlc_raw, list) else 0
+    item_type = str(payload.get("type") or "").strip().lower() or None
+    is_dlc = item_type == "dlc"
     fallback = _steam_fallback_images(appid)
     header_image = payload.get("header_image") or fallback["header_image"]
     capsule_image = payload.get("capsule_image") or payload.get("capsule_imagev5") or fallback["capsule_image"]
@@ -450,6 +479,8 @@ def _summary_from_payload(appid: str, payload: Dict[str, Any]) -> Dict[str, Any]
         "platforms": _parse_platforms(payload),
         "required_age": _parse_required_age(payload),
         "dlc_count": dlc_count,
+        "item_type": item_type,
+        "is_dlc": is_dlc,
         "denuvo": str(appid) in DENUVO_APP_ID_SET,
     }
 
@@ -885,19 +916,29 @@ def get_steam_summary(appid: str) -> Optional[dict]:
     return summary
 
 
-def get_steam_detail(appid: str) -> Optional[dict]:
-    cache_key = f"steam:detail:{appid}"
+def get_steam_detail(appid: str, locale: Optional[str] = None) -> Optional[dict]:
+    normalized_locale = normalize_content_locale(locale)
+    cache_key = _detail_cache_key(appid, normalized_locale)
     cached = cache_client.get_json(cache_key)
     if cached and cached.get("media_version") == MEDIA_VERSION:
         if "denuvo" not in cached:
             cached["denuvo"] = str(appid) in DENUVO_APP_ID_SET
+        if "content_locale" not in cached:
+            cached["content_locale"] = normalized_locale
         return cached
-    data = _store_appdetails([appid])
+
+    steam_language = _steam_language_for_locale(normalized_locale)
+    data = _store_appdetails([appid], language=steam_language)
     entry = data.get(str(appid), {})
     if not entry or not entry.get("success"):
+        if normalized_locale != "en":
+            fallback = get_steam_detail(appid, locale="en")
+            if fallback:
+                return fallback
         return cached
     detail = _detail_from_payload(appid, entry.get("data") or {})
     detail["media_version"] = MEDIA_VERSION
+    detail["content_locale"] = normalized_locale
     cache_client.set_json(cache_key, detail, ttl=STEAM_CACHE_TTL_SECONDS)
     return detail
 
@@ -963,6 +1004,7 @@ def search_store(term: str) -> List[Dict[str, Any]]:
         return []
     results = []
     for item in items:
+        item_type = str(item.get("type") or "").strip().lower() or None
         price = item.get("price") or {}
         results.append(
             {
@@ -973,6 +1015,8 @@ def search_store(term: str) -> List[Dict[str, Any]]:
                 "capsule_image": item.get("tiny_image"),
                 "background": None,
                 "required_age": None,
+                "item_type": item_type,
+                "is_dlc": item_type == "dlc",
                 "denuvo": str(item.get("id")) in DENUVO_APP_ID_SET,
                 "price": {
                     "initial": price.get("initial"),

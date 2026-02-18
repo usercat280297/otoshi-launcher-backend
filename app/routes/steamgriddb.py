@@ -178,11 +178,31 @@ def _resolve_lookup_assets(
             return result
         assets = fetch_assets(int(game["id"]))
         fallback = build_steam_fallback_assets(steam_app_id or "")
+        grid = assets.get("grid") or fallback.get("grid") or fallback.get("hero")
+        hero = assets.get("hero") or fallback.get("hero") or grid
+        logo = assets.get("logo") or assets.get("icon") or fallback.get("logo")
+        raw_icon = assets.get("icon")
+        if raw_icon and steam_app_id:
+            marker = f"/steam/apps/{steam_app_id}/icon.jpg"
+            lower_icon = raw_icon.lower()
+            if marker in lower_icon and any(
+                value and "steamgriddb.com" in value.lower()
+                for value in (logo, grid, hero)
+            ):
+                raw_icon = None
+        icon = (
+            raw_icon
+            or assets.get("logo")
+            or grid
+            or hero
+            or fallback.get("icon")
+            or fallback.get("logo")
+        )
         merged = {
-            "grid": assets.get("grid") or fallback.get("grid"),
-            "hero": assets.get("hero") or fallback.get("hero"),
-            "logo": assets.get("logo") or fallback.get("logo"),
-            "icon": assets.get("icon") or fallback.get("icon"),
+            "grid": grid,
+            "hero": hero,
+            "logo": logo,
+            "icon": icon,
         }
         result = {
             "game_id": int(game["id"]),

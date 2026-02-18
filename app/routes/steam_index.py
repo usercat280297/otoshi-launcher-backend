@@ -8,13 +8,22 @@ from ..schemas import (
     SteamCatalogOut,
     SteamGameDetailOut,
     SteamIndexAssetOut,
+    SteamIndexAssetBatchOut,
+    SteamIndexClassificationOut,
+    SteamIndexCoverageOut,
+    SteamIndexCompletionIn,
+    SteamIndexCompletionOut,
     SteamIndexAssetPrefetchIn,
     SteamIndexAssetPrefetchOut,
+    SteamIndexIngestFullIn,
     SteamIndexIngestRebuildIn,
     SteamIndexIngestRebuildOut,
+    SteamIndexIngestResumeIn,
     SteamIndexIngestStatusOut,
+    SteamIndexRankingOut,
 )
-from ..services.steam_catalog import get_catalog_page, get_lua_appids, search_store
+from ..services.settings import detect_system_locale, get_user_locale, normalize_locale
+from ..services.steam_catalog import get_catalog_page, get_lua_appids, get_steam_detail, search_store
 from ..services.steam_extended import (
     get_steam_achievements,
     get_steam_dlc,
@@ -22,18 +31,74 @@ from ..services.steam_extended import (
     get_steam_reviews_summary,
 )
 from ..services.steam_global_index import (
+    get_catalog_coverage,
     get_ingest_status,
+    get_title_classification,
     get_title_detail,
+    enforce_catalog_completeness,
+    ingest_full_catalog,
     ingest_global_catalog,
     list_catalog,
+    list_top_ranked,
     prefetch_assets,
+    prefetch_assets_force_visible,
+    resume_ingest_catalog,
     resolve_assets_chain,
     search_catalog,
 )
+from ..services.steamgriddb import build_steam_fallback_assets
 from ..services.steam_news_enhanced import fetch_news_enhanced
 from .deps import require_admin_access
 
 router = APIRouter()
+
+_LOCALIZED_DETAIL_FIELDS = (
+    "name",
+    "short_description",
+    "about_the_game",
+    "about_the_game_html",
+    "detailed_description",
+    "detailed_description_html",
+    "genres",
+    "categories",
+    "developers",
+    "publishers",
+    "release_date",
+    "platforms",
+    "required_age",
+    "item_type",
+    "is_dlc",
+    "dlc_count",
+)
+
+
+def _resolve_content_locale(preferred: str | None) -> str:
+    if preferred:
+        return normalize_locale(preferred)
+    user_locale = get_user_locale()
+    if user_locale:
+        return normalize_locale(user_locale)
+    return normalize_locale(detect_system_locale())
+
+
+def _merge_localized_detail(base: dict, localized: dict | None, resolved_locale: str) -> dict:
+    if not isinstance(base, dict):
+        return base
+    if not isinstance(localized, dict):
+        base["content_locale"] = resolved_locale
+        return base
+    merged = dict(base)
+    for field in _LOCALIZED_DETAIL_FIELDS:
+        value = localized.get(field)
+        if value is None:
+            continue
+        if isinstance(value, str) and not value.strip():
+            continue
+        if isinstance(value, list) and not value:
+            continue
+        merged[field] = value
+    merged["content_locale"] = localized.get("content_locale") or resolved_locale
+    return merged
 
 
 @router.get("/catalog", response_model=SteamCatalogOut)
@@ -76,9 +141,20 @@ def steam_index_search(
     limit: int = Query(24, ge=1, le=200),
     offset: int = Query(0, ge=0),
     source: str = Query("global", pattern="^(global)$"),
+    include_dlc: bool | None = Query(None),
+    ranking_mode: str | None = Query(None, pattern="^(relevance|recent|updated|priority|hot|top)?$"),
+    must_have_artwork: bool = Query(False),
     db: Session = Depends(get_db),
 ):
-    total, items = search_catalog(db=db, q=q, limit=limit, offset=offset)
+    total, items = search_catalog(
+        db=db,
+        q=q,
+        limit=limit,
+        offset=offset,
+        include_dlc=include_dlc,
+        ranking_mode=ranking_mode,
+        must_have_artwork=must_have_artwork,
+    )
     if total <= 0 or not items:
         # Fallback path before first ingest: search upstream Steam store directly.
         store_results = search_store(q)
@@ -103,9 +179,17 @@ def steam_index_search(
 
 
 @router.get("/games/{app_id}", response_model=SteamGameDetailOut)
-def steam_index_game_detail(app_id: str, db: Session = Depends(get_db)):
+def steam_index_game_detail(
+    app_id: str,
+    locale: str | None = Query(None),
+    db: Session = Depends(get_db),
+):
+    resolved_locale = _resolve_content_locale(locale)
     detail = get_title_detail(db, app_id)
+    localized = get_steam_detail(app_id, locale=resolved_locale)
     if not detail:
+        if localized:
+            return _merge_localized_detail(localized, localized, resolved_locale)
         return {
             "app_id": app_id,
             "name": f"Steam App {app_id}",
@@ -130,8 +214,17 @@ def steam_index_game_detail(app_id: str, db: Session = Depends(get_db)):
             "genres": [],
             "platforms": [],
             "denuvo": False,
+            "content_locale": resolved_locale,
         }
-    return detail
+    return _merge_localized_detail(detail, localized, resolved_locale)
+
+
+@router.get("/games/{app_id}/classification", response_model=SteamIndexClassificationOut)
+def steam_index_game_classification(
+    app_id: str,
+    db: Session = Depends(get_db),
+):
+    return get_title_classification(db, app_id)
 
 
 @router.get("/games/{app_id}/extended")
@@ -185,9 +278,95 @@ def steam_index_assets_prefetch(
     return result
 
 
+@router.post("/assets/prefetch-force-visible", response_model=SteamIndexAssetPrefetchOut)
+def steam_index_assets_prefetch_force_visible(
+    payload: SteamIndexAssetPrefetchIn,
+    db: Session = Depends(get_db),
+):
+    return prefetch_assets_force_visible(
+        db,
+        app_ids=payload.app_ids,
+    )
+
+
+@router.post("/assets/batch", response_model=SteamIndexAssetBatchOut)
+def steam_index_assets_batch(
+    payload: SteamIndexAssetPrefetchIn,
+    db: Session = Depends(get_db),
+):
+    items = {}
+    for raw_id in payload.app_ids:
+        app_id = str(raw_id or "").strip()
+        if not app_id.isdigit():
+            continue
+        try:
+            resolved = resolve_assets_chain(db, app_id, force_refresh=payload.force_refresh)
+        except Exception:
+            resolved = {
+                "app_id": app_id,
+                "selected_source": "steam",
+                "assets": build_steam_fallback_assets(app_id),
+                "quality_score": 0.0,
+                "version": 1,
+            }
+        items[app_id] = resolved
+    return {"items": items}
+
+
 @router.get("/ingest/status", response_model=SteamIndexIngestStatusOut)
 def steam_index_ingest_status(db: Session = Depends(get_db)):
     return get_ingest_status(db)
+
+
+@router.get("/coverage", response_model=SteamIndexCoverageOut)
+def steam_index_coverage(db: Session = Depends(get_db)):
+    return get_catalog_coverage(db)
+
+
+@router.get("/ranking/top", response_model=SteamIndexRankingOut)
+def steam_index_ranking_top(
+    limit: int = Query(12, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    include_dlc: bool = Query(False),
+    db: Session = Depends(get_db),
+):
+    total, items = list_top_ranked(
+        db,
+        limit=limit,
+        offset=offset,
+        include_dlc=include_dlc,
+    )
+    return {
+        "total": total,
+        "offset": offset,
+        "limit": limit,
+        "items": items,
+    }
+
+
+@router.post("/ingest/full", response_model=SteamIndexIngestRebuildOut)
+def steam_index_ingest_full(
+    payload: SteamIndexIngestFullIn,
+    _: object = Depends(require_admin_access),
+    db: Session = Depends(get_db),
+):
+    return ingest_full_catalog(
+        db=db,
+        max_items=payload.max_items,
+    )
+
+
+@router.post("/ingest/resume", response_model=SteamIndexIngestRebuildOut)
+def steam_index_ingest_resume(
+    payload: SteamIndexIngestResumeIn,
+    _: object = Depends(require_admin_access),
+    db: Session = Depends(get_db),
+):
+    return resume_ingest_catalog(
+        db=db,
+        resume_token=payload.resume_token,
+        max_items=payload.max_items,
+    )
 
 
 @router.post("/ingest/rebuild", response_model=SteamIndexIngestRebuildOut)
@@ -200,4 +379,17 @@ def steam_index_ingest_rebuild(
         db=db,
         max_items=payload.max_items,
         enrich_details=payload.enrich_details,
+    )
+
+
+@router.post("/ingest/complete", response_model=SteamIndexCompletionOut)
+def steam_index_ingest_complete(
+    payload: SteamIndexCompletionIn,
+    _: object = Depends(require_admin_access),
+    db: Session = Depends(get_db),
+):
+    return enforce_catalog_completeness(
+        db=db,
+        app_ids=payload.app_ids,
+        max_items=payload.max_items,
     )
