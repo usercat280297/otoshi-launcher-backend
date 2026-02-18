@@ -424,23 +424,6 @@ def publish_launcher_artifacts(
     if not published:
         raise HTTPException(status_code=400, detail="No valid artifacts resolved for publish")
 
-    ARTIFACT_REGISTRY_PATH.parent.mkdir(parents=True, exist_ok=True)
-    serialized = [
-        item.model_dump() if hasattr(item, "model_dump") else item.dict()
-        for item in published
-    ]
-    registry_payload = {
-        "updated_at": published_at,
-        "artifacts": serialized,
-    }
-    try:
-        ARTIFACT_REGISTRY_PATH.write_text(
-            json.dumps(registry_payload, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
-    except OSError as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to write artifact registry: {exc}")
-
     # Persist to DB so artifacts survive stateless deploys.
     for item in published:
         channel = str(item.channel or "stable").strip() or "stable"
@@ -484,6 +467,24 @@ def publish_launcher_artifacts(
                 )
             )
     db.commit()
+
+    # Best-effort registry file for local/portable environments (DB is source of truth in production).
+    try:
+        ARTIFACT_REGISTRY_PATH.parent.mkdir(parents=True, exist_ok=True)
+        serialized = [
+            item.model_dump() if hasattr(item, "model_dump") else item.dict()
+            for item in published
+        ]
+        registry_payload = {
+            "updated_at": published_at,
+            "artifacts": serialized,
+        }
+        ARTIFACT_REGISTRY_PATH.write_text(
+            json.dumps(registry_payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    except OSError:
+        pass
 
     return published
 
