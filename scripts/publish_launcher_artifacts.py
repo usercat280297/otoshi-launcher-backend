@@ -3,8 +3,10 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 import requests
 
@@ -33,7 +35,44 @@ def detect_platform(path: Path) -> str:
     return "windows"
 
 
-def discover_artifacts(downloads_dir: Path) -> list[dict[str, Any]]:
+def _encode_path(path_value: str) -> str:
+    normalized = str(path_value or "").replace("\\", "/").strip("/")
+    if not normalized:
+        return ""
+    return "/".join(quote(segment, safe="") for segment in normalized.split("/") if segment)
+
+
+def _build_download_url(filename: str, args: argparse.Namespace) -> str:
+    safe_filename = Path(filename).name
+    encoded_filename = quote(safe_filename, safe="")
+
+    template = str(args.download_url_template or "").strip()
+    if template:
+        return template.format(filename=safe_filename, filename_url=encoded_filename)
+
+    base = str(args.download_base_url or "").strip()
+    if base:
+        return f"{base.rstrip('/')}/{encoded_filename}"
+
+    hf_repo_id = str(args.hf_repo_id or "").strip()
+    if hf_repo_id:
+        hf_repo_type = str(args.hf_repo_type or "dataset").strip().lower() or "dataset"
+        hf_revision = str(args.hf_revision or "main").strip() or "main"
+        hf_subdir = _encode_path(str(args.hf_subdir or ""))
+        object_path = f"{hf_subdir}/{encoded_filename}" if hf_subdir else encoded_filename
+
+        repo_segment = quote(hf_repo_id, safe="/")
+        revision_segment = quote(hf_revision, safe="/")
+        if hf_repo_type == "space":
+            return f"https://huggingface.co/spaces/{repo_segment}/resolve/{revision_segment}/{object_path}?download=1"
+        if hf_repo_type == "model":
+            return f"https://huggingface.co/{repo_segment}/resolve/{revision_segment}/{object_path}?download=1"
+        return f"https://huggingface.co/datasets/{repo_segment}/resolve/{revision_segment}/{object_path}?download=1"
+
+    return f"/launcher-download/file/{safe_filename}"
+
+
+def discover_artifacts(downloads_dir: Path, args: argparse.Namespace) -> list[dict[str, Any]]:
     candidates: list[Path] = []
     patterns = (
         "Otoshi*.exe",
@@ -56,7 +95,7 @@ def discover_artifacts(downloads_dir: Path) -> list[dict[str, Any]]:
                 "size_bytes": path.stat().st_size,
                 "sha256": sha256_file(path),
                 "platform": detect_platform(path),
-                "download_url": f"/launcher-download/file/{path.name}",
+                "download_url": _build_download_url(path.name, args),
             }
         )
     return payload
@@ -84,13 +123,44 @@ def main() -> int:
     parser.add_argument("--admin-key", required=True, help="ADMIN_API_KEY value")
     parser.add_argument("--downloads-dir", default="dist", help="Directory containing launcher artifacts")
     parser.add_argument("--channel", default="stable", help="Release channel label")
+    parser.add_argument(
+        "--download-url-template",
+        default="",
+        help="Custom URL template, supports {filename} and {filename_url}",
+    )
+    parser.add_argument(
+        "--download-base-url",
+        default="",
+        help="Base URL for hosted binaries, example: https://cdn.example.com/launcher",
+    )
+    parser.add_argument(
+        "--hf-repo-id",
+        default=os.getenv("LAUNCHER_HF_REPO_ID", os.getenv("HF_REPO_ID", "")),
+        help="Hugging Face repo id for artifact links, example: owner/repo",
+    )
+    parser.add_argument(
+        "--hf-repo-type",
+        choices=("dataset", "model", "space"),
+        default=os.getenv("LAUNCHER_HF_REPO_TYPE", "dataset"),
+        help="Hugging Face repo type",
+    )
+    parser.add_argument(
+        "--hf-revision",
+        default=os.getenv("LAUNCHER_HF_REVISION", os.getenv("HF_REVISION", "main")),
+        help="Hugging Face revision/branch name",
+    )
+    parser.add_argument(
+        "--hf-subdir",
+        default=os.getenv("LAUNCHER_HF_ARTIFACT_SUBDIR", ""),
+        help="Optional subfolder in HF repo where launcher artifacts live",
+    )
     args = parser.parse_args()
 
     downloads_dir = Path(args.downloads_dir).resolve()
     if not downloads_dir.exists():
         raise SystemExit(f"downloads directory not found: {downloads_dir}")
 
-    artifacts = discover_artifacts(downloads_dir)
+    artifacts = discover_artifacts(downloads_dir, args)
     if not artifacts:
         raise SystemExit("no artifacts discovered to publish")
 

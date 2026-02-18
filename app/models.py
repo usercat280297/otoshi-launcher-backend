@@ -903,3 +903,22 @@ class StreamingSession(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     user = relationship("User", back_populates="streaming_sessions")
+
+
+class LauncherArtifactRecord(Base):
+    __tablename__ = "launcher_artifacts"
+    __table_args__ = (
+        UniqueConstraint("filename", "channel", name="uq_launcher_artifact_filename_channel"),
+    )
+
+    id = Column(String(36), primary_key=True, default=generate_id)
+    kind = Column(String(32), nullable=False)
+    version = Column(String(40), nullable=False)
+    filename = Column(String(255), nullable=False)
+    size_bytes = Column(BigInteger, nullable=False)
+    sha256 = Column(String(64), nullable=False)
+    download_url = Column(String(1000), nullable=False)
+    platform = Column(String(32), nullable=True)
+    channel = Column(String(32), nullable=False, default="stable")
+    published_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

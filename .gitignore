@@ -8,6 +8,7 @@
 !scripts/
 scripts/*
 !scripts/publish_launcher_artifacts.py
+!scripts/upload_launcher_artifacts_to_hf.py
 !native/
 native/*
 !native/README.md

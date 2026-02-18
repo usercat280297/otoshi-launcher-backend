@@ -3,7 +3,7 @@ Launcher download routes - Serve launcher installer files
 """
 
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel
 from pathlib import Path
 import os
@@ -13,8 +13,13 @@ import zipfile
 import json
 from datetime import datetime
 from typing import Optional
+from urllib.parse import quote, urlparse
 
 from .deps import require_admin_access
+from sqlalchemy.orm import Session
+
+from ..db import get_db
+from ..models import LauncherArtifactRecord
 
 router = APIRouter()
 
@@ -27,6 +32,11 @@ ARTIFACT_REGISTRY_PATH = (
     if _artifact_registry_raw
     else (DOWNLOADS_DIR / "artifacts.registry.json")
 )
+REMOTE_DOWNLOAD_BASE_URL = os.environ.get("LAUNCHER_DOWNLOAD_BASE_URL", "").strip()
+LAUNCHER_HF_REPO_ID = os.environ.get("LAUNCHER_HF_REPO_ID", "").strip()
+LAUNCHER_HF_REPO_TYPE = os.environ.get("LAUNCHER_HF_REPO_TYPE", "dataset").strip().lower() or "dataset"
+LAUNCHER_HF_REVISION = os.environ.get("LAUNCHER_HF_REVISION", "main").strip() or "main"
+LAUNCHER_HF_ARTIFACT_SUBDIR = os.environ.get("LAUNCHER_HF_ARTIFACT_SUBDIR", "").strip()
 
 
 class LauncherInfo(BaseModel):
@@ -172,10 +182,52 @@ def _infer_platform_from_filename(filename: str, explicit: Optional[str] = None)
 
 def _normalize_download_url(filename: str, download_url: Optional[str]) -> str:
     normalized = str(download_url or "").strip()
+    if normalized.startswith("http://") or normalized.startswith("https://"):
+        return normalized
     if normalized.startswith("/launcher-download/file/"):
+        return normalized
+    if normalized.startswith("/"):
         return normalized
     safe_name = Path(filename).name
     return f"/launcher-download/file/{safe_name}"
+
+
+def _is_external_download_url(download_url: Optional[str]) -> bool:
+    value = str(download_url or "").strip()
+    if not value:
+        return False
+    parsed = urlparse(value)
+    return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+
+
+def _encode_path(path_value: str) -> str:
+    normalized = str(path_value or "").replace("\\", "/").strip("/")
+    if not normalized:
+        return ""
+    return "/".join(quote(segment, safe="") for segment in normalized.split("/") if segment)
+
+
+def _build_remote_download_url(filename: str) -> Optional[str]:
+    safe_filename = Path(filename).name
+    if not safe_filename:
+        return None
+    encoded_filename = quote(safe_filename, safe="")
+
+    if REMOTE_DOWNLOAD_BASE_URL:
+        return f"{REMOTE_DOWNLOAD_BASE_URL.rstrip('/')}/{encoded_filename}"
+
+    if LAUNCHER_HF_REPO_ID:
+        repo_id = quote(LAUNCHER_HF_REPO_ID, safe="/")
+        revision = quote(LAUNCHER_HF_REVISION, safe="/")
+        subdir = _encode_path(LAUNCHER_HF_ARTIFACT_SUBDIR)
+        object_path = f"{subdir}/{encoded_filename}" if subdir else encoded_filename
+        if LAUNCHER_HF_REPO_TYPE == "space":
+            return f"https://huggingface.co/spaces/{repo_id}/resolve/{revision}/{object_path}?download=1"
+        if LAUNCHER_HF_REPO_TYPE == "model":
+            return f"https://huggingface.co/{repo_id}/resolve/{revision}/{object_path}?download=1"
+        return f"https://huggingface.co/datasets/{repo_id}/resolve/{revision}/{object_path}?download=1"
+
+    return None
 
 
 def _load_registry_artifacts() -> list[LauncherArtifact]:
@@ -215,14 +267,69 @@ def _load_registry_artifacts() -> list[LauncherArtifact]:
             if path.exists():
                 item.size_bytes = int(path.stat().st_size)
                 item.sha256 = get_file_hash(path)
+        item_path = DOWNLOADS_DIR / filename
+        if not _is_external_download_url(item.download_url) and not item_path.exists():
+            remote_url = _build_remote_download_url(filename)
+            if remote_url:
+                item.download_url = remote_url
         if item.size_bytes > 0 and item.sha256:
             items.append(item)
     return items
 
 
+def _load_db_artifacts(db: Session) -> list[LauncherArtifact]:
+    records = (
+        db.query(LauncherArtifactRecord)
+        .order_by(
+            LauncherArtifactRecord.published_at.desc(),
+            LauncherArtifactRecord.kind.asc(),
+            LauncherArtifactRecord.filename.desc(),
+        )
+        .all()
+    )
+    items: list[LauncherArtifact] = []
+    for record in records:
+        items.append(
+            LauncherArtifact(
+                kind=str(record.kind),
+                version=str(record.version),
+                filename=str(record.filename),
+                size_bytes=int(record.size_bytes or 0),
+                sha256=str(record.sha256 or ""),
+                download_url=str(record.download_url or ""),
+                platform=str(record.platform or "").strip() or None,
+                channel=str(record.channel or "").strip() or None,
+                published_at=(record.published_at.isoformat() if record.published_at else None),
+            )
+        )
+    return items
+
+
 @router.get("/info", response_model=LauncherInfo)
-def get_launcher_info():
+def get_launcher_info(db: Session = Depends(get_db)):
     """Get information about the latest launcher version"""
+    db_items = _load_db_artifacts(db)
+    db_installer = next((item for item in db_items if item.kind == "installer"), None)
+    if db_installer:
+        return LauncherInfo(
+            version=db_installer.version,
+            filename=db_installer.filename,
+            size_bytes=db_installer.size_bytes,
+            sha256=db_installer.sha256,
+            download_url=db_installer.download_url,
+        )
+
+    registry_items = _load_registry_artifacts()
+    registry_installer = next((item for item in registry_items if item.kind == "installer"), None)
+    if registry_installer:
+        return LauncherInfo(
+            version=registry_installer.version,
+            filename=registry_installer.filename,
+            size_bytes=registry_installer.size_bytes,
+            sha256=registry_installer.sha256,
+            download_url=registry_installer.download_url,
+        )
+
     installer = find_installer_file()
 
     if not installer:
@@ -240,7 +347,11 @@ def get_launcher_info():
 
 
 @router.get("/artifacts", response_model=list[LauncherArtifact])
-def get_launcher_artifacts():
+def get_launcher_artifacts(db: Session = Depends(get_db)):
+    db_items = _load_db_artifacts(db)
+    if db_items:
+        return db_items
+
     registry_items = _load_registry_artifacts()
     if registry_items:
         return registry_items
@@ -271,6 +382,7 @@ def get_launcher_artifacts():
 def publish_launcher_artifacts(
     payload: LauncherArtifactPublishIn,
     _: object = Depends(require_admin_access),
+    db: Session = Depends(get_db),
 ):
     if not payload.artifacts:
         raise HTTPException(status_code=400, detail="No artifacts provided")
@@ -283,7 +395,10 @@ def publish_launcher_artifacts(
         if not filename:
             continue
         file_path = DOWNLOADS_DIR / filename
-        if not file_path.exists() and not item.download_url:
+        requested_download_url = str(item.download_url or "").strip()
+        if not file_path.exists() and not requested_download_url:
+            requested_download_url = str(_build_remote_download_url(filename) or "").strip()
+        if not file_path.exists() and not requested_download_url:
             continue
 
         version = str(item.version or _extract_version(filename))
@@ -299,7 +414,7 @@ def publish_launcher_artifacts(
                 filename=filename,
                 size_bytes=size_bytes,
                 sha256=sha256,
-                download_url=_normalize_download_url(filename, item.download_url),
+                download_url=_normalize_download_url(filename, requested_download_url),
                 platform=_infer_platform_from_filename(filename, item.platform),
                 channel=str(item.channel or "").strip() or "stable",
                 published_at=published_at,
@@ -326,17 +441,81 @@ def publish_launcher_artifacts(
     except OSError as exc:
         raise HTTPException(status_code=500, detail=f"Failed to write artifact registry: {exc}")
 
+    # Persist to DB so artifacts survive stateless deploys.
+    for item in published:
+        channel = str(item.channel or "stable").strip() or "stable"
+        existing = (
+            db.query(LauncherArtifactRecord)
+            .filter(LauncherArtifactRecord.filename == item.filename)
+            .filter(LauncherArtifactRecord.channel == channel)
+            .first()
+        )
+        if existing:
+            existing.kind = item.kind
+            existing.version = item.version
+            existing.size_bytes = int(item.size_bytes)
+            existing.sha256 = item.sha256
+            existing.download_url = item.download_url
+            existing.platform = item.platform
+            existing.channel = channel
+            if item.published_at:
+                try:
+                    existing.published_at = datetime.fromisoformat(item.published_at)
+                except Exception:
+                    pass
+        else:
+            published_at_dt = datetime.utcnow()
+            if item.published_at:
+                try:
+                    published_at_dt = datetime.fromisoformat(item.published_at)
+                except Exception:
+                    pass
+            db.add(
+                LauncherArtifactRecord(
+                    kind=item.kind,
+                    version=item.version,
+                    filename=item.filename,
+                    size_bytes=int(item.size_bytes),
+                    sha256=item.sha256,
+                    download_url=item.download_url,
+                    platform=item.platform,
+                    channel=channel,
+                    published_at=published_at_dt,
+                )
+            )
+    db.commit()
+
     return published
 
 
 @router.get("/file/{filename}")
-def download_launcher(filename: str):
+def download_launcher(filename: str, db: Session = Depends(get_db)):
     """Download the launcher installer"""
     # Sanitize filename
     safe_filename = Path(filename).name
     filepath = DOWNLOADS_DIR / safe_filename
 
     if not filepath.exists():
+        db_item = (
+            db.query(LauncherArtifactRecord)
+            .filter(LauncherArtifactRecord.filename.ilike(safe_filename))
+            .order_by(LauncherArtifactRecord.published_at.desc())
+            .first()
+        )
+        if db_item and _is_external_download_url(db_item.download_url):
+            return RedirectResponse(url=str(db_item.download_url), status_code=307)
+
+        registry_item = next(
+            (item for item in _load_registry_artifacts() if item.filename.lower() == safe_filename.lower()),
+            None,
+        )
+        if registry_item and _is_external_download_url(registry_item.download_url):
+            return RedirectResponse(url=registry_item.download_url, status_code=307)
+
+        remote_url = _build_remote_download_url(safe_filename)
+        if remote_url:
+            return RedirectResponse(url=remote_url, status_code=307)
+
         raise HTTPException(status_code=404, detail="File not found")
 
     # Security check - ensure file is in downloads dir
@@ -356,7 +535,7 @@ def download_launcher(filename: str):
 
 
 @router.get("/check-update")
-def check_update(current_version: str = "0.0.0"):
+def check_update(current_version: str = "0.0.0", db: Session = Depends(get_db)):
     """Check if a newer version is available"""
     from packaging import version
 
@@ -367,6 +546,28 @@ def check_update(current_version: str = "0.0.0"):
         update_available = latest > current
 
         if update_available:
+            db_items = _load_db_artifacts(db)
+            db_installer = next((item for item in db_items if item.kind == "installer"), None)
+            if db_installer:
+                return {
+                    "update_available": True,
+                    "current_version": current_version,
+                    "latest_version": db_installer.version,
+                    "download_url": db_installer.download_url,
+                    "size_bytes": db_installer.size_bytes,
+                }
+
+            registry_items = _load_registry_artifacts()
+            registry_installer = next((item for item in registry_items if item.kind == "installer"), None)
+            if registry_installer:
+                return {
+                    "update_available": True,
+                    "current_version": current_version,
+                    "latest_version": registry_installer.version,
+                    "download_url": registry_installer.download_url,
+                    "size_bytes": registry_installer.size_bytes,
+                }
+
             installer = find_installer_file()
             if installer:
                 return {

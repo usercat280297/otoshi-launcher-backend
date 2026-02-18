@@ -44,6 +44,10 @@ services:
         sync: false
       - key: HF_REPO_ID
         sync: false
+      - key: LAUNCHER_HF_REPO_ID
+        sync: false
+      - key: LAUNCHER_HF_ARTIFACT_SUBDIR
+        sync: false
       - key: LUA_REMOTE_ONLY
         value: "true"
       - key: MANIFEST_REMOTE_ONLY
@@ -52,8 +56,14 @@ services:
         value: "true"
       - key: HF_REPO_TYPE
         value: "dataset"
+      - key: LAUNCHER_HF_REPO_TYPE
+        value: "dataset"
       - key: HF_REVISION
         value: "main"
+      - key: LAUNCHER_HF_REVISION
+        value: "main"
+      - key: LAUNCHER_DOWNLOAD_BASE_URL
+        sync: false
 
 databases:
   - name: otoshi-db
