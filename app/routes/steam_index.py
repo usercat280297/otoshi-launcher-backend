@@ -71,6 +71,34 @@ _LOCALIZED_DETAIL_FIELDS = (
     "dlc_count",
 )
 
+_RANKING_MODE_ALLOWED = {"relevance", "recent", "updated", "priority", "hot", "top"}
+
+
+def _parse_boolish(value: str | bool | None, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    normalized = str(value).strip().lower()
+    if not normalized:
+        return default
+    if normalized in {"1", "true", "yes", "y", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "n", "off"}:
+        return False
+    return default
+
+
+def _normalize_ranking_mode(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = str(value).strip().lower()
+    if not normalized:
+        return None
+    if normalized in _RANKING_MODE_ALLOWED:
+        return normalized
+    return None
+
 
 def _resolve_content_locale(preferred: str | None) -> str:
     if preferred:
@@ -141,19 +169,27 @@ def steam_index_search(
     limit: int = Query(24, ge=1, le=200),
     offset: int = Query(0, ge=0),
     source: str = Query("global", pattern="^(global)$"),
-    include_dlc: bool | None = Query(None),
-    ranking_mode: str | None = Query(None, pattern="^(relevance|recent|updated|priority|hot|top)?$"),
-    must_have_artwork: bool = Query(False),
+    include_dlc: str | None = Query(None),
+    ranking_mode: str | None = Query(None),
+    must_have_artwork: str | bool | None = Query(False),
     db: Session = Depends(get_db),
 ):
+    include_dlc_flag = (
+        None
+        if include_dlc is None
+        else _parse_boolish(include_dlc, True)
+    )
+    ranking_mode_value = _normalize_ranking_mode(ranking_mode)
+    must_have_artwork_flag = _parse_boolish(must_have_artwork, False)
+
     total, items = search_catalog(
         db=db,
         q=q,
         limit=limit,
         offset=offset,
-        include_dlc=include_dlc,
-        ranking_mode=ranking_mode,
-        must_have_artwork=must_have_artwork,
+        include_dlc=include_dlc_flag,
+        ranking_mode=ranking_mode_value,
+        must_have_artwork=must_have_artwork_flag,
     )
     if total <= 0 or not items:
         # Fallback path before first ingest: search upstream Steam store directly.
@@ -258,10 +294,14 @@ def steam_index_game_extended(
 @router.get("/assets/{app_id}", response_model=SteamIndexAssetOut)
 def steam_index_assets(
     app_id: str,
-    force_refresh: bool = Query(False),
+    force_refresh: str | bool | None = Query(False),
     db: Session = Depends(get_db),
 ):
-    payload = resolve_assets_chain(db, app_id, force_refresh=force_refresh)
+    payload = resolve_assets_chain(
+        db,
+        app_id,
+        force_refresh=_parse_boolish(force_refresh, False),
+    )
     return payload
 
 
@@ -327,14 +367,14 @@ def steam_index_coverage(db: Session = Depends(get_db)):
 def steam_index_ranking_top(
     limit: int = Query(12, ge=1, le=100),
     offset: int = Query(0, ge=0),
-    include_dlc: bool = Query(False),
+    include_dlc: str | bool | None = Query(False),
     db: Session = Depends(get_db),
 ):
     total, items = list_top_ranked(
         db,
         limit=limit,
         offset=offset,
-        include_dlc=include_dlc,
+        include_dlc=_parse_boolish(include_dlc, False),
     )
     return {
         "total": total,

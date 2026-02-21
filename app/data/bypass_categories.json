@@ -26,7 +26,7 @@
       "name": "DENUVO",
       "description": "Games with Denuvo anti-tamper protection",
       "icon": "denuvo",
-      "games": ["1172380", "2050650", "1413480", "1687950", "2215260", "2055290", "2680010", "1817230", "1551360", "1382330", "1113000", "990080", "39140", "287700", "1244460", "1874000", "532210", "601150", "594570", "3764200", "2358720", "2215430", "1237320", "1777620", "2486820", "2513280", "1794960", "1235140", "2072450", "2161700", "1285190", "809890"]
+      "games": ["1172380", "2050650", "1413480", "1687950", "2215260", "2055290", "2680010", "1817230", "1551360", "1382330", "1113000", "990080", "39140", "287700", "1244460", "1874000", "532210", "601150", "594570", "3764200", "2358720", "3489700", "2215430", "1237320", "1777620", "2486820", "2513280", "1794960", "1235140", "2072450", "2161700", "1285190", "809890"]
     },
     {
       "id": "other",
@@ -294,6 +294,12 @@
     "2358720": {
       "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/Black%20myth%20wukong/crack/OxoLemon_BMW_Crack_baseonOxZeOn_hypervisor.rar?download=true",
       "name": "Black Myth: Wukong",
+      "category": "denuvo"
+    },
+    "3489700": {
+      "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/C.r.ack%20files/StellarBlade_0xoLemon_hyperez.rar?download=true",
+      "name": "Stellar Blade",
+      "note": "Hypervisor Beta Crack - Not recommended for inexperienced users",
       "category": "denuvo"
     },
     "3240220": {

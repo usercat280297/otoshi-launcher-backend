@@ -558,6 +558,44 @@ class DownloadPrepareIn(BaseModel):
     create_subfolder: bool = True
 
 
+class P2PPeerRegisterIn(BaseModel):
+    device_id: str = Field(min_length=1, max_length=120)
+    port: int = Field(ge=1, le=65535)
+    addresses: List[str] = Field(default_factory=list, max_length=24)
+    share_enabled: bool = True
+    upload_limit_bps: int = Field(default=0, ge=0)
+
+
+class P2PPeerRegisterOut(BaseModel):
+    peer_id: str
+    heartbeat_interval_s: int
+
+
+class P2PPeerHeartbeatIn(BaseModel):
+    peer_id: str
+    addresses: List[str] = Field(default_factory=list, max_length=24)
+    port: Optional[int] = Field(default=None, ge=1, le=65535)
+    share_enabled: Optional[bool] = None
+    upload_limit_bps: Optional[int] = Field(default=None, ge=0)
+
+
+class P2PPeerHeartbeatOut(BaseModel):
+    ok: bool = True
+    heartbeat_interval_s: int
+
+
+class P2PPeerOut(BaseModel):
+    peer_id: str
+    port: int
+    addresses: List[str] = Field(default_factory=list)
+    upload_limit_bps: int = 0
+    last_seen_at: Optional[datetime] = None
+
+
+class P2PPeerListOut(BaseModel):
+    peers: List[P2PPeerOut] = Field(default_factory=list)
+
+
 class LibraryEntryOut(BaseModel):
     id: str
     purchased_at: datetime

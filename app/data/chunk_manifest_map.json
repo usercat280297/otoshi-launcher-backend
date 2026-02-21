@@ -37,6 +37,13 @@
       "hf_folder": "BlackMythWukong/BlackMythWukong/BlackMythWukong v1.0.21.23831",
       "manifest": "BlackMythWukong\\manifest_v1.0.21.23831.json"
     },
+    "cloudheim": {
+      "folder": "Cloudheim",
+      "game_name": "Cloudheim",
+      "version": "v29.99",
+      "hf_folder": "Cloudheim/Cloudheim/Cloudheim v29.99",
+      "manifest": "Cloudheim\\manifest.json"
+    },
     "codevein2": {
       "folder": "CodeVein2",
       "game_name": "CodeVein2",
@@ -113,6 +120,13 @@
       "version": "Silent Hill F",
       "hf_folder": "SILENT HILL F/Silent Hill F",
       "manifest": "SILENT HILL F\\manifest_Silent Hill F.json"
+    },
+    "stellarblade": {
+      "folder": "StellarBlade",
+      "game_name": "StellarBlade",
+      "version": "v1.4.1",
+      "hf_folder": "StellarBlade/StellarBlade/StellarBlade v1.4.1",
+      "manifest": "StellarBlade\\manifest.json"
     },
     "yakuzakiwami3": {
       "folder": "YakuzaKiwami3",

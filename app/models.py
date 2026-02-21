@@ -78,6 +78,7 @@ class User(Base):
     review_votes = relationship("ReviewVote", back_populates="user", cascade="all, delete")
     screenshots = relationship("Screenshot", back_populates="user", cascade="all, delete")
     activity_events = relationship("ActivityEvent", back_populates="user", cascade="all, delete")
+    p2p_peers = relationship("P2PPeer", back_populates="user", cascade="all, delete")
     remote_downloads = relationship("RemoteDownload", back_populates="user", cascade="all, delete")
     streaming_sessions = relationship("StreamingSession", back_populates="user", cascade="all, delete")
     preorders = relationship("Preorder", back_populates="user", cascade="all, delete")
@@ -922,3 +923,23 @@ class LauncherArtifactRecord(Base):
     channel = Column(String(32), nullable=False, default="stable")
     published_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class P2PPeer(Base):
+    __tablename__ = "p2p_peers"
+    __table_args__ = (
+        UniqueConstraint("user_id", "device_id", name="uq_p2p_peer_user_device"),
+    )
+
+    id = Column(String(36), primary_key=True, default=generate_id)
+    user_id = Column(String(36), ForeignKey("users.id"), nullable=False)
+    device_id = Column(String(120), nullable=False)
+    port = Column(Integer, nullable=False, default=0)
+    addresses = Column(JSON, default=list)
+    share_enabled = Column(Boolean, default=True)
+    upload_limit_bps = Column(BigInteger, default=0)
+    last_seen_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    user = relationship("User", back_populates="p2p_peers")

@@ -13,17 +13,12 @@ from fastapi import APIRouter, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
-from ..core.config import STEAMGRIDDB_API_KEY
 from ..schemas import SteamGridDBAssetOut
 from ..services.steam_catalog import get_steam_summary
 from ..services.steamgriddb import (
     SteamGridDBError,
-    build_title_variants,
     build_steam_fallback_assets,
-    fetch_assets,
-    get_cached_assets,
-    search_game_by_steam_id,
-    search_game_by_title,
+    resolve_assets,
     save_cached_assets,
 )
 
@@ -112,133 +107,39 @@ def _resolve_lookup_assets(
 ):
     if not title and not steam_app_id:
         raise HTTPException(status_code=400, detail="Missing title or steam_app_id")
-
-    if not STEAMGRIDDB_API_KEY:
-        fallback = build_steam_fallback_assets(steam_app_id or "")
-        result = {
-            "game_id": 0,
-            "name": title or (steam_app_id or ""),
-            "grid": fallback.get("grid"),
-            "hero": fallback.get("hero"),
-            "logo": fallback.get("logo"),
-            "icon": fallback.get("icon"),
-        }
-        if steam_app_id:
-            save_cached_assets(
-                steam_app_id,
-                result["name"],
-                None,
-                fallback,
-                source="steam_fallback",
-            )
-        return result
-
-    if steam_app_id:
-        cached = get_cached_assets(steam_app_id)
-        if cached:
-            return cached
-
-    game = None
+    app_id = str(steam_app_id or "").strip()
     search_title = title
-    if not search_title and steam_app_id:
-        summary = get_steam_summary(steam_app_id)
+    if not search_title and app_id:
+        summary = get_steam_summary(app_id)
         search_title = summary.get("name") if summary else None
 
     try:
-        if steam_app_id:
-            try:
-                game = search_game_by_steam_id(steam_app_id)
-            except SteamGridDBError:
-                game = None
-        if not game and search_title:
-            for candidate in build_title_variants(search_title):
-                try:
-                    game = search_game_by_title(candidate)
-                except SteamGridDBError:
-                    game = None
-                if game:
-                    break
-        if not game or not game.get("id"):
-            fallback = build_steam_fallback_assets(steam_app_id or "")
-            result = {
-                "game_id": 0,
-                "name": search_title or (steam_app_id or ""),
-                "grid": fallback.get("grid"),
-                "hero": fallback.get("hero"),
-                "logo": fallback.get("logo"),
-                "icon": fallback.get("icon"),
-            }
-            save_cached_assets(
-                steam_app_id or "",
-                result["name"],
-                None,
-                fallback,
-                source="steam_fallback",
-            )
+        result = resolve_assets(app_id or None, search_title)
+        if result and any(result.get(key) for key in ("grid", "hero", "logo", "icon")):
             return result
-        assets = fetch_assets(int(game["id"]))
-        fallback = build_steam_fallback_assets(steam_app_id or "")
-        grid = assets.get("grid") or fallback.get("grid") or fallback.get("hero")
-        hero = assets.get("hero") or fallback.get("hero") or grid
-        logo = assets.get("logo") or assets.get("icon") or fallback.get("logo")
-        raw_icon = assets.get("icon")
-        if raw_icon and steam_app_id:
-            marker = f"/steam/apps/{steam_app_id}/icon.jpg"
-            lower_icon = raw_icon.lower()
-            if marker in lower_icon and any(
-                value and "steamgriddb.com" in value.lower()
-                for value in (logo, grid, hero)
-            ):
-                raw_icon = None
-        icon = (
-            raw_icon
-            or assets.get("logo")
-            or grid
-            or hero
-            or fallback.get("icon")
-            or fallback.get("logo")
-        )
-        merged = {
-            "grid": grid,
-            "hero": hero,
-            "logo": logo,
-            "icon": icon,
-        }
-        result = {
-            "game_id": int(game["id"]),
-            "name": game.get("name") or (title or ""),
-            "grid": merged.get("grid"),
-            "hero": merged.get("hero"),
-            "logo": merged.get("logo"),
-            "icon": merged.get("icon"),
-        }
-        source = "steamgriddb" if any(assets.values()) else "steam_fallback"
-        save_cached_assets(
-            steam_app_id or "",
-            result["name"],
-            int(game["id"]),
-            merged,
-            source=source,
-        )
-        return result
     except SteamGridDBError:
-        fallback = build_steam_fallback_assets(steam_app_id or "")
-        result = {
-            "game_id": 0,
-            "name": search_title or (steam_app_id or ""),
-            "grid": fallback.get("grid"),
-            "hero": fallback.get("hero"),
-            "logo": fallback.get("logo"),
-            "icon": fallback.get("icon"),
-        }
+        pass
+    except Exception:
+        pass
+
+    fallback = build_steam_fallback_assets(app_id)
+    result = {
+        "game_id": 0,
+        "name": search_title or app_id or "",
+        "grid": fallback.get("grid"),
+        "hero": fallback.get("hero"),
+        "logo": fallback.get("logo"),
+        "icon": fallback.get("icon"),
+    }
+    if app_id:
         save_cached_assets(
-            steam_app_id or "",
+            app_id,
             result["name"],
             None,
             fallback,
             source="steam_fallback",
         )
-        return result
+    return result
 
 
 class LookupBatchItemIn(BaseModel):

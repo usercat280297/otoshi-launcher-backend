@@ -1,11 +1,13 @@
 from pathlib import Path
 import os
+import re
 import sys
 from urllib.parse import unquote
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 import threading
+from sqlalchemy.exc import OperationalError
 
 from .core.config import (
     DATABASE_URL,
@@ -70,6 +72,7 @@ from .routes import (
     updates_v2,
     cdn_v2,
     steam_index,
+    p2p,
 )
 from .websocket import manager
 from fastapi import WebSocket, WebSocketDisconnect, status, Request, HTTPException
@@ -79,6 +82,35 @@ from .core.config import SECRET_KEY, ALGORITHM
 from .middleware import AuthMiddleware, RateLimitMiddleware
 
 app = FastAPI(title="Otoshi Launcher API", version="0.1.0")
+
+_LOCAL_ORIGIN_REGEX = re.compile(r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$", re.IGNORECASE)
+_TAURI_ORIGIN_REGEX = re.compile(r"^(tauri://localhost|https?://tauri\.localhost)$", re.IGNORECASE)
+_BASE_SCHEMA_LOCK = threading.Lock()
+_BASE_SCHEMA_READY = False
+
+
+def _ensure_base_schema() -> None:
+    global _BASE_SCHEMA_READY
+    if _BASE_SCHEMA_READY:
+        return
+    with _BASE_SCHEMA_LOCK:
+        if _BASE_SCHEMA_READY:
+            return
+        try:
+            Base.metadata.create_all(bind=engine)
+        except OperationalError as exc:
+            # SQLite schema init may race in portable/multi-start scenarios.
+            if "already exists" not in str(exc).lower():
+                raise
+        _BASE_SCHEMA_READY = True
+
+
+def _is_origin_allowed(origin: str) -> bool:
+    if not origin:
+        return False
+    if "*" in CORS_ORIGINS or origin in CORS_ORIGINS:
+        return True
+    return bool(_LOCAL_ORIGIN_REGEX.match(origin) or _TAURI_ORIGIN_REGEX.match(origin))
 
 
 @app.exception_handler(HTTPException)
@@ -90,7 +122,7 @@ async def http_exception_handler(request: Request, exc: HTTPException):
         content={"detail": exc.detail},
     )
     # Add CORS headers for cross-origin error responses
-    if origin in CORS_ORIGINS or "*" in CORS_ORIGINS:
+    if _is_origin_allowed(origin):
         response.headers["Access-Control-Allow-Origin"] = origin
         response.headers["Access-Control-Allow-Credentials"] = "true"
         response.headers["Access-Control-Allow-Methods"] = "*"
@@ -106,6 +138,7 @@ app.add_middleware(RateLimitMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS,
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$|^tauri://localhost$|^https?://tauri\.localhost$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -143,7 +176,7 @@ def _should_seed_sample_games() -> bool:
 
 @app.on_event("startup")
 def on_startup() -> None:
-    Base.metadata.create_all(bind=engine)
+    _ensure_base_schema()
     ensure_schema()
     cache_client.connect()
     _ensure_storage_dirs()
@@ -234,6 +267,7 @@ def health_runtime():
         "sidecar_ready": True,
         "runtime_mode": runtime_mode,
         "index_mode": index_mode,
+        "cdn_chunk_size_limit_bytes": 2 * 1024 * 1024 * 1024,
         "global_index_v1": bool(GLOBAL_INDEX_V1),
         "db_path": db_path,
         "db_exists": bool(db_path and Path(db_path).exists()),
@@ -285,6 +319,7 @@ app.include_router(self_heal_v2.router)
 app.include_router(updates_v2.router)
 app.include_router(cdn_v2.router)
 app.include_router(steam_index.router, prefix="/steam/index", tags=["steam-index"])
+app.include_router(p2p.router, prefix="/p2p", tags=["p2p"])
 
 
 @app.websocket("/ws")

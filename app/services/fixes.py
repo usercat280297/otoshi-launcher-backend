@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -10,6 +11,7 @@ from ..core.denuvo import DENUVO_APP_ID_SET
 from .steam_catalog import get_catalog_page
 
 DATA_DIR = Path(__file__).resolve().parents[1] / "data"
+_PLACEHOLDER_STEAM_APP_RE = re.compile(r"^steam app\s+\d+$", re.IGNORECASE)
 
 
 def _load_json(name: str) -> dict[str, Any]:
@@ -83,6 +85,72 @@ def _normalize_bypass_game_options(game_info: Any) -> list[dict[str, Any]]:
     return []
 
 
+def _clean_text(value: Any) -> str:
+    return str(value or "").strip()
+
+
+def _is_placeholder_title(value: Any, app_id: str | None = None) -> bool:
+    text = _clean_text(value)
+    if not text:
+        return True
+    if text.isdigit():
+        return True
+    if _PLACEHOLDER_STEAM_APP_RE.match(text):
+        return True
+    app_text = _clean_text(app_id)
+    if app_text:
+        lowered = text.lower()
+        if lowered == app_text.lower() or lowered == f"steam app {app_text}".lower():
+            return True
+    return False
+
+
+def _extract_option_names(options: list[dict[str, Any]]) -> list[str]:
+    names: list[str] = []
+    for option in options:
+        name = _clean_text(option.get("name"))
+        if name:
+            names.append(name)
+    return names
+
+
+def _resolve_entry_name(
+    app_id: str,
+    steam: dict[str, Any] | None,
+    options: list[dict[str, Any]],
+    explicit_name: Any = None,
+) -> str:
+    candidates: list[str] = []
+    explicit = _clean_text(explicit_name)
+    if explicit:
+        candidates.append(explicit)
+    candidates.extend(_extract_option_names(options))
+    steam_name = _clean_text((steam or {}).get("name"))
+    if steam_name:
+        candidates.append(steam_name)
+
+    for candidate in candidates:
+        if not _is_placeholder_title(candidate, app_id):
+            return candidate
+    for candidate in candidates:
+        if candidate:
+            return candidate
+    return app_id
+
+
+def _patch_steam_summary_name(
+    steam: dict[str, Any] | None,
+    app_id: str,
+    preferred_name: str,
+) -> dict[str, Any] | None:
+    if not isinstance(steam, dict):
+        return steam
+    payload = dict(steam)
+    if _is_placeholder_title(payload.get("name"), app_id):
+        payload["name"] = preferred_name
+    return payload
+
+
 def _get_steam_summary(app_id: str) -> dict[str, Any] | None:
     summaries = get_catalog_page([str(app_id)])
     if not summaries:
@@ -96,11 +164,14 @@ def _build_entries(appids: Iterable[str], mapping: dict[str, Any]) -> list[dict[
     summary_map = {item.get("app_id"): item for item in summaries}
     entries = []
     for app_id in appids:
-        options = _normalize_options(mapping.get(app_id))
+        raw_entry = mapping.get(app_id)
+        options = _normalize_options(raw_entry)
         if not options:
             continue
         steam = summary_map.get(app_id)
-        name = steam.get("name") if steam else options[0].get("name")
+        explicit_name = raw_entry.get("name") if isinstance(raw_entry, dict) else None
+        name = _resolve_entry_name(app_id, steam, options, explicit_name=explicit_name)
+        steam = _patch_steam_summary_name(steam, app_id, name)
         entries.append(
             {
                 "app_id": app_id,
@@ -249,7 +320,7 @@ def _find_bypass_game(app_id: str) -> tuple[dict[str, Any] | None, dict[str, Any
 
 
 def get_online_fix_catalog(offset: int = 0, limit: int = 100) -> dict[str, Any]:
-    cache_key = f"fixes:online:{offset}:{limit}"
+    cache_key = f"fixes:online:v2:{offset}:{limit}"
     cached = cache_client.get_json(cache_key)
     if cached:
         return cached
@@ -263,7 +334,7 @@ def get_online_fix_catalog(offset: int = 0, limit: int = 100) -> dict[str, Any]:
 
 
 def get_bypass_catalog(offset: int = 0, limit: int = 100) -> dict[str, Any]:
-    cache_key = f"fixes:bypass:{offset}:{limit}"
+    cache_key = f"fixes:bypass:v2:{offset}:{limit}"
     cached = cache_client.get_json(cache_key)
     if cached:
         return cached
@@ -294,7 +365,7 @@ def get_bypass_option(app_id: str) -> dict[str, Any] | None:
 
 def get_bypass_categories() -> list[dict[str, Any]]:
     """Get all bypass categories with their games."""
-    cache_key = "fixes:bypass:categories"
+    cache_key = "fixes:bypass:categories:v2"
     cached = cache_client.get_json(cache_key)
     if cached:
         return cached
@@ -320,11 +391,18 @@ def get_bypass_categories() -> list[dict[str, Any]]:
             game_info = games_data.get(app_id, {})
             steam = summary_map.get(app_id)
             options = _normalize_bypass_game_options(game_info)
+            name = _resolve_entry_name(
+                app_id,
+                steam,
+                options,
+                explicit_name=game_info.get("name") if isinstance(game_info, dict) else None,
+            )
+            steam = _patch_steam_summary_name(steam, app_id, name)
 
             games.append(
                 {
                     "app_id": app_id,
-                    "name": game_info.get("name", app_id),
+                    "name": name,
                     "steam": steam,
                     "options": options,
                     "denuvo": app_id in DENUVO_APP_ID_SET,
@@ -348,7 +426,7 @@ def get_bypass_categories() -> list[dict[str, Any]]:
 
 def get_bypass_by_category(category_id: str, offset: int = 0, limit: int = 100) -> dict[str, Any]:
     """Get bypass games filtered by category."""
-    cache_key = f"fixes:bypass:cat:{category_id}:{offset}:{limit}"
+    cache_key = f"fixes:bypass:cat:v2:{category_id}:{offset}:{limit}"
     cached = cache_client.get_json(cache_key)
     if cached:
         return cached
@@ -379,10 +457,17 @@ def get_bypass_by_category(category_id: str, offset: int = 0, limit: int = 100) 
         game_info = games_data.get(app_id, {})
         steam = summary_map.get(app_id)
         options = _normalize_bypass_game_options(game_info)
+        name = _resolve_entry_name(
+            app_id,
+            steam,
+            options,
+            explicit_name=game_info.get("name") if isinstance(game_info, dict) else None,
+        )
+        steam = _patch_steam_summary_name(steam, app_id, name)
         items.append(
             {
                 "app_id": app_id,
-                "name": game_info.get("name", app_id),
+                "name": name,
                 "steam": steam,
                 "options": options,
                 "denuvo": app_id in DENUVO_APP_ID_SET,
@@ -416,7 +501,8 @@ def get_fix_entry_detail(kind: str, app_id: str) -> dict[str, Any] | None:
     if kind == "online-fix":
         options = get_online_fix_options(app_id)
         steam = _get_steam_summary(app_id)
-        name = (steam or {}).get("name") or (options[0].get("name") if options else app_id)
+        name = _resolve_entry_name(app_id, steam, options, explicit_name=None)
+        steam = _patch_steam_summary_name(steam, app_id, name)
     else:
         game_info, category = _find_bypass_game(app_id)
         options = _normalize_bypass_game_options(game_info) if game_info else []
@@ -424,10 +510,9 @@ def get_fix_entry_detail(kind: str, app_id: str) -> dict[str, Any] | None:
             fallback = _load_json("bypass.json")
             options = _normalize_options(fallback.get(app_id))
         steam = _get_steam_summary(app_id)
-        if isinstance(game_info, dict):
-            name = game_info.get("name") or (steam or {}).get("name") or app_id
-        else:
-            name = (steam or {}).get("name") or (options[0].get("name") if options else app_id)
+        explicit_name = game_info.get("name") if isinstance(game_info, dict) else None
+        name = _resolve_entry_name(app_id, steam, options, explicit_name=explicit_name)
+        steam = _patch_steam_summary_name(steam, app_id, name)
 
     if not options:
         return None

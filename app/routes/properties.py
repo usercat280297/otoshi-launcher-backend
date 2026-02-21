@@ -10,6 +10,7 @@ import os
 import re
 import shutil
 import uuid
+from threading import Lock
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -29,14 +30,23 @@ router = APIRouter()
 
 _NAME_CLEAN = re.compile(r"[^a-z0-9]+", re.IGNORECASE)
 _SCHEMA_READY = False
+_SCHEMA_LOCK = Lock()
 
 
-def _ensure_properties_schema() -> None:
+def _ensure_properties_schema(force: bool = False) -> None:
     global _SCHEMA_READY
-    if _SCHEMA_READY:
+    if _SCHEMA_READY and not force:
         return
-    Base.metadata.create_all(bind=engine)
-    _SCHEMA_READY = True
+    with _SCHEMA_LOCK:
+        if _SCHEMA_READY and not force:
+            return
+        try:
+            Base.metadata.create_all(bind=engine)
+        except OperationalError as exc:
+            # SQLite can race if schema init runs concurrently.
+            if "already exists" not in str(exc).lower():
+                raise
+        _SCHEMA_READY = True
 
 
 def _retry_on_missing_table(action):
@@ -46,7 +56,7 @@ def _retry_on_missing_table(action):
     except OperationalError as exc:
         if "no such table" not in str(exc).lower():
             raise
-        _ensure_properties_schema()
+        _ensure_properties_schema(force=True)
         return action()
 
 

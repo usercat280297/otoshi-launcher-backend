@@ -59,6 +59,7 @@ _DLC_HINTS = re.compile(
     r"\b(dlc|soundtrack|season pass|expansion|pack|set|skin|costume|mission|bonus|artbook|pachislot)\b",
     re.IGNORECASE,
 )
+_PLACEHOLDER_STEAM_APP_PATTERN = re.compile(r"^steam app\s+\d+$", re.IGNORECASE)
 _SCHEMA_LOCK = Lock()
 _SCHEMA_READY = False
 _CHUNK_MANIFEST_MAP_FILE = Path(__file__).resolve().parents[1] / "data" / "chunk_manifest_map.json"
@@ -87,18 +88,23 @@ def _looks_like_generic_epic_badge(url: str) -> bool:
     return any(token in text for token in noisy_tokens)
 
 
-def ensure_global_index_schema() -> None:
+def ensure_global_index_schema(force: bool = False) -> None:
     """
     Ensure new global-index tables exist even on upgraded installs that still
     have an older sqlite file.
     """
     global _SCHEMA_READY
-    if _SCHEMA_READY:
+    if _SCHEMA_READY and not force:
         return
     with _SCHEMA_LOCK:
-        if _SCHEMA_READY:
+        if _SCHEMA_READY and not force:
             return
-        Base.metadata.create_all(bind=engine)
+        try:
+            Base.metadata.create_all(bind=engine)
+        except OperationalError as exc:
+            # SQLite schema init may race in portable/multi-process startup.
+            if "already exists" not in str(exc).lower():
+                raise
         _SCHEMA_READY = True
 
 
@@ -110,13 +116,46 @@ def _with_schema_retry(action):
         # Handle "no such table" gracefully on stale DBs.
         if "no such table" not in str(exc).lower():
             raise
-        ensure_global_index_schema()
+        ensure_global_index_schema(force=True)
         return action()
 
 
 def normalize_title(value: str) -> str:
     cleaned = _NON_ALNUM.sub(" ", (value or "").strip().lower())
     return " ".join(cleaned.split())
+
+
+def _is_placeholder_title_name(name: Any, app_id: Optional[str] = None) -> bool:
+    text = str(name or "").strip()
+    if not text:
+        return True
+
+    lowered = text.lower()
+    if _PLACEHOLDER_STEAM_APP_PATTERN.match(text):
+        return True
+    if text.isdigit():
+        return True
+    if app_id and lowered in {str(app_id).strip().lower(), f"steam app {str(app_id).strip().lower()}"}:
+        return True
+    return False
+
+
+def _pick_best_title_name(app_id: str, *candidates: Any) -> str:
+    app_id_text = str(app_id or "").strip()
+    normalized: List[str] = []
+    for candidate in candidates:
+        text = str(candidate or "").strip()
+        if text:
+            normalized.append(text)
+
+    for text in normalized:
+        if not _is_placeholder_title_name(text, app_id_text):
+            return text
+
+    if normalized:
+        return normalized[0]
+
+    return f"Steam App {app_id_text}" if app_id_text else ""
 
 
 def _steam_applist_url() -> str:
@@ -1274,23 +1313,31 @@ def _upsert_alias(db: Session, title_id: str, alias: str, locale: str = "en", so
 
 def _ensure_title_row(db: Session, app_id: str, name: str, source: str = "steam_api") -> SteamTitle:
     row = db.query(SteamTitle).filter(SteamTitle.app_id == str(app_id)).first()
-    normalized_name = normalize_title(name)
+    app_id_text = str(app_id)
+    incoming_name = _pick_best_title_name(app_id_text, name)
+    normalized_name = normalize_title(incoming_name)
     if row:
-        row.name = name
-        row.normalized_name = normalized_name
+        existing_name = str(row.name or "").strip()
+        incoming_placeholder = _is_placeholder_title_name(incoming_name, app_id_text)
+        existing_placeholder = _is_placeholder_title_name(existing_name, app_id_text)
+        should_update_name = (not incoming_placeholder) or existing_placeholder
+        if should_update_name:
+            row.name = incoming_name
+            row.normalized_name = normalized_name
+            _upsert_alias(db, row.id, incoming_name, locale="en", source=source)
         row.source = source
         row.updated_at = datetime.utcnow()
     else:
         row = SteamTitle(
-            app_id=str(app_id),
-            name=name,
+            app_id=app_id_text,
+            name=incoming_name,
             normalized_name=normalized_name,
             source=source,
             state="active",
         )
         db.add(row)
         db.flush()
-    _upsert_alias(db, row.id, name, locale="en", source=source)
+        _upsert_alias(db, row.id, incoming_name, locale="en", source=source)
     return row
 
 
@@ -1538,12 +1585,25 @@ def _infer_artwork_coverage(source: Optional[str]) -> str:
     return "steam"
 
 
-def _build_catalog_item(title: SteamTitle) -> Dict[str, Any]:
+def _build_catalog_item(
+    title: SteamTitle,
+    manifest_name_map: Optional[Dict[str, str]] = None,
+) -> Dict[str, Any]:
     metadata = title.metadata_row
     detail_payload = (metadata.detail_payload if metadata else {}) or {}
     summary_payload = (metadata.summary_payload if metadata else {}) or {}
     selected_assets = (title.assets_row.selected_assets if title.assets_row else {}) or {}
     fallback_assets = build_steam_fallback_assets(title.app_id)
+    manifest_name = None
+    if manifest_name_map:
+        manifest_name = manifest_name_map.get(str(title.app_id))
+    resolved_name = _pick_best_title_name(
+        str(title.app_id),
+        detail_payload.get("name"),
+        summary_payload.get("name"),
+        title.name,
+        manifest_name,
+    )
 
     header = (
         selected_assets.get("grid")
@@ -1575,18 +1635,18 @@ def _build_catalog_item(title: SteamTitle) -> Dict[str, Any]:
         or ""
     ).strip().lower()
     is_dlc = item_type == "dlc"
-    if not is_dlc and _DLC_HINTS.search(title.name or ""):
+    if not is_dlc and _DLC_HINTS.search(resolved_name or ""):
         is_dlc = True
     is_base_game = not is_dlc
     classification_confidence = 0.62
     if item_type:
         classification_confidence = 0.97 if item_type in {"game", "dlc"} else 0.88
-    elif _DLC_HINTS.search(title.name or ""):
+    elif _DLC_HINTS.search(resolved_name or ""):
         classification_confidence = 0.83
 
     return {
         "app_id": title.app_id,
-        "name": title.name,
+        "name": resolved_name,
         "short_description": (
             detail_payload.get("short_description")
             or summary_payload.get("short_description")
@@ -1634,6 +1694,7 @@ def list_catalog(
     library_appids: Optional[Iterable[str]] = None,
 ) -> Tuple[int, List[Dict[str, Any]]]:
     def _run():
+        manifest_name_map = _read_manifest_name_map()
         query = db.query(SteamTitle)
         scope_set: Optional[set[str]] = None
         if scope in {"library", "owned"}:
@@ -1714,7 +1775,7 @@ def list_catalog(
                     )
                     page_rows.extend(rest_rows)
 
-            return total, [_build_catalog_item(row) for row in page_rows]
+            return total, [_build_catalog_item(row, manifest_name_map) for row in page_rows]
         if sort_value in {"recent", "updated"}:
             query = query.order_by(desc(SteamTitle.updated_at), SteamTitle.name.asc())
         elif sort_value == "appid":
@@ -1724,7 +1785,7 @@ def list_catalog(
 
         total = query.count()
         rows = query.offset(max(0, offset)).limit(max(1, limit)).all()
-        return total, [_build_catalog_item(row) for row in rows]
+        return total, [_build_catalog_item(row, manifest_name_map) for row in rows]
 
     return _with_schema_retry(_run)
 
@@ -1739,6 +1800,7 @@ def search_catalog(
     must_have_artwork: bool = False,
 ) -> Tuple[int, List[Dict[str, Any]]]:
     def _run():
+        manifest_name_map = _read_manifest_name_map()
         query = (q or "").strip()
         if not query:
             return 0, []
@@ -1750,7 +1812,7 @@ def search_catalog(
         if query.isdigit():
             exact = base.filter(SteamTitle.app_id == query).first()
             if exact:
-                return 1, [_build_catalog_item(exact)]
+                return 1, [_build_catalog_item(exact, manifest_name_map)]
 
         alias_subq = select(SteamTitleAlias.steam_title_id).where(
             SteamTitleAlias.normalized_alias.ilike(f"%{normalized}%")
@@ -1862,13 +1924,14 @@ def search_catalog(
 
         total = rows_query.count()
         rows = rows_query.offset(max(0, offset)).limit(max_limit).all()
-        return total, [_build_catalog_item(row) for row in rows]
+        return total, [_build_catalog_item(row, manifest_name_map) for row in rows]
 
     return _with_schema_retry(_run)
 
 
 def get_title_detail(db: Session, app_id: str) -> Optional[Dict[str, Any]]:
     def _run():
+        manifest_name_map = _read_manifest_name_map()
         title = db.query(SteamTitle).filter(SteamTitle.app_id == str(app_id)).first()
         if not title:
             refreshed = refresh_title_from_steam(db, app_id)
@@ -1888,7 +1951,7 @@ def get_title_detail(db: Session, app_id: str) -> Optional[Dict[str, Any]]:
                 db.commit()
 
         if not detail:
-            summary = _build_catalog_item(title)
+            summary = _build_catalog_item(title, manifest_name_map)
             return {
                 **summary,
                 "about_the_game": summary.get("short_description"),

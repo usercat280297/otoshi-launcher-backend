@@ -186,6 +186,47 @@ def ensure_schema() -> None:
                 )
             )
 
+    if "p2p_peers" not in tables:
+        created_default = f"DEFAULT {timestamp_default}" if timestamp_default else ""
+        updated_default = f"DEFAULT {timestamp_default}" if timestamp_default else ""
+        last_seen_default = f"DEFAULT {timestamp_default}" if timestamp_default else ""
+        addresses_type = "JSONB" if engine.dialect.name == "postgresql" else "TEXT"
+        bool_true = _bool_default(True)
+        create_statement = f"""
+            CREATE TABLE p2p_peers (
+                id VARCHAR(36) PRIMARY KEY,
+                user_id VARCHAR(36) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                device_id VARCHAR(120) NOT NULL,
+                port INTEGER NOT NULL,
+                addresses {addresses_type},
+                share_enabled BOOLEAN DEFAULT {bool_true},
+                upload_limit_bps BIGINT DEFAULT 0,
+                last_seen_at {timestamp_type} {last_seen_default},
+                created_at {timestamp_type} {created_default},
+                updated_at {timestamp_type} {updated_default}
+            )
+        """
+        with engine.begin() as connection:
+            connection.execute(text(create_statement))
+            connection.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_p2p_peers_user_id "
+                    "ON p2p_peers (user_id)"
+                )
+            )
+            connection.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_p2p_peers_last_seen_at "
+                    "ON p2p_peers (last_seen_at)"
+                )
+            )
+            connection.execute(
+                text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS uq_p2p_peers_user_device "
+                    "ON p2p_peers (user_id, device_id)"
+                )
+            )
+
 
 def _apply_alters(statements: list[str]) -> None:
     if not statements:

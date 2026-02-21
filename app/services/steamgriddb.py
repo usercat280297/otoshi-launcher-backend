@@ -48,9 +48,16 @@ _DISK_CACHE_PATH = _STORAGE_ROOT / "steamgriddb_cache.json"
 _TITLE_CLEAN_RE = re.compile(r"[\u2122\u00ae\u00a9]")
 _TITLE_EDITION_RE = re.compile(
     r"\b(ultimate|deluxe|complete|goty|gold|platinum|definitive|collector|edition|bundle|pack|"
-    r"soundtrack|remaster|remastered|enhanced|beta|demo)\b.*",
+    r"soundtrack|remaster|remastered|enhanced|beta|demo|showcase|trial|prologue|playtest|benchmark|"
+    r"open\s*beta|closed\s*beta|technical\s*test|test\s*server)\b.*",
     re.IGNORECASE,
 )
+_TITLE_DERIVATIVE_RE = re.compile(
+    r"\b(demo|showcase|trial|prologue|playtest|benchmark|alpha|beta|open\s*beta|closed\s*beta|"
+    r"technical\s*test|test\s*server)\b",
+    re.IGNORECASE,
+)
+_TITLE_MATCH_NORMALIZE_RE = re.compile(r"[^a-z0-9]+")
 
 
 def build_title_variants(title: str) -> list[str]:
@@ -74,6 +81,23 @@ def build_title_variants(title: str) -> list[str]:
     if trimmed and trimmed not in variants:
         variants.append(trimmed)
     return variants
+
+
+def _is_derivative_title(title: Optional[str]) -> bool:
+    text = str(title or "").strip()
+    if not text:
+        return False
+    return _TITLE_DERIVATIVE_RE.search(text) is not None
+
+
+def _normalize_title_for_match(title: Optional[str]) -> str:
+    text = str(title or "").strip().lower()
+    if not text:
+        return ""
+    text = _TITLE_CLEAN_RE.sub("", text)
+    text = text.replace("’", "'").replace("`", "'").replace("'", "")
+    normalized = _TITLE_MATCH_NORMALIZE_RE.sub(" ", text)
+    return " ".join(normalized.split()).strip()
 
 
 def _request(path: str, params: Optional[dict[str, Any]] = None) -> list[dict[str, Any]]:
@@ -207,7 +231,7 @@ def _pick_best(items: list[dict[str, Any]]) -> Optional[str]:
 
 
 def search_game_by_title(title: str) -> Optional[dict[str, Any]]:
-    cache_key = f"steamgriddb:search:{title.lower()}"
+    cache_key = f"steamgriddb:search:v2:{title.lower()}"
     cached = _cache_get_json(cache_key)
     if cached:
         return cached if cached.get("id") else None
@@ -224,7 +248,21 @@ def search_game_by_title(title: str) -> Optional[dict[str, Any]]:
         _cache_set_json(cache_key, {"id": None, "name": title}, ttl=STEAMGRIDDB_CACHE_TTL_SECONDS)
         return None
     exact = next((item for item in data if (item.get("name") or "").lower() == title.lower()), None)
-    candidate = exact or data[0]
+    candidate = exact
+    if candidate is None:
+        title_norm = _normalize_title_for_match(title)
+        if title_norm:
+            candidate = next(
+                (
+                    item
+                    for item in data
+                    if _normalize_title_for_match(item.get("name") or "") == title_norm
+                ),
+                None,
+            )
+    if candidate is None:
+        _cache_set_json(cache_key, {"id": None, "name": title}, ttl=STEAMGRIDDB_CACHE_TTL_SECONDS)
+        return None
     result = {
         "id": candidate.get("id"),
         "name": candidate.get("name") or title,
@@ -361,7 +399,11 @@ def _normalize_assets_payload(
     }
 
 
-def get_cached_assets(steam_app_id: str) -> Optional[dict[str, Optional[str]]]:
+def get_cached_assets(
+    steam_app_id: str,
+    *,
+    prefer_steamgriddb: bool = False,
+) -> Optional[dict[str, Optional[str]]]:
     if not steam_app_id or not str(steam_app_id).isdigit():
         return None
     try:
@@ -374,6 +416,12 @@ def get_cached_assets(steam_app_id: str) -> Optional[dict[str, Optional[str]]]:
             if not entry:
                 return None
             if entry.expires_at and entry.expires_at < datetime.utcnow():
+                return None
+            if (
+                prefer_steamgriddb
+                and STEAMGRIDDB_API_KEY
+                and (entry.source or "").strip().lower() == "steam_fallback"
+            ):
                 return None
             payload = _normalize_assets_payload(
                 steam_app_id=steam_app_id,
@@ -443,7 +491,7 @@ def save_cached_assets(
 def resolve_assets(steam_app_id: Optional[str], title: Optional[str]) -> dict[str, Optional[str]]:
     steam_app_id = str(steam_app_id or "")
     if steam_app_id:
-        cached = get_cached_assets(steam_app_id)
+        cached = get_cached_assets(steam_app_id, prefer_steamgriddb=True)
         if cached:
             return _normalize_assets_payload(
                 steam_app_id=steam_app_id,
@@ -458,12 +506,21 @@ def resolve_assets(steam_app_id: Optional[str], title: Optional[str]) -> dict[st
 
     game = None
     try:
-        if steam_app_id:
+        derivative_title = _is_derivative_title(search_title)
+        if search_title and derivative_title:
+            for candidate in build_title_variants(search_title):
+                try:
+                    game = search_game_by_title(candidate)
+                except SteamGridDBError:
+                    game = None
+                if game:
+                    break
+        if not game and steam_app_id:
             try:
                 game = search_game_by_steam_id(steam_app_id)
             except SteamGridDBError:
                 game = None
-        if not game and search_title:
+        if not game and search_title and not derivative_title:
             for candidate in build_title_variants(search_title):
                 try:
                     game = search_game_by_title(candidate)
@@ -546,7 +603,7 @@ def prewarm_steamgriddb_cache(appids: list[str], concurrency: int) -> None:
     max_workers = max(1, concurrency)
 
     def _worker(app_id: str) -> None:
-        cached = get_cached_assets(app_id)
+        cached = get_cached_assets(app_id, prefer_steamgriddb=True)
         if cached:
             return
         title = None

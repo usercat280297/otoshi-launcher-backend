@@ -225,6 +225,38 @@
         "guide.note.crack_folder_copy"
       ]
     },
+    "3489700": {
+      "title": "guide.bypass.3489700.title",
+      "summary": "guide.bypass.3489700.summary",
+      "steps": [
+        {
+          "title": "guide.step.copy_crack_folder",
+          "description": "guide.step.copy_crack_folder_desc"
+        },
+        {
+          "title": "guide.step.enable_vtx_svm",
+          "description": "guide.step.enable_vtx_svm_desc_stellar_blade"
+        },
+        {
+          "title": "guide.step.disable_secure_boot",
+          "description": "guide.step.disable_secure_boot_desc"
+        },
+        {
+          "title": "guide.step.launch_game",
+          "description": "guide.step.launch_game_desc_stellar_blade"
+        }
+      ],
+      "warnings": [
+        "guide.warning.bios_changes",
+        "guide.warning.restart",
+        "guide.warning.stellar_blade_launcher_only"
+      ],
+      "notes": [
+        "guide.note.stellar_blade_launcher_check",
+        "guide.note.restart_requirement",
+        "guide.note.crack_folder_copy"
+      ]
+    },
     "1777620": {
       "title": "guide.bypass.1777620.title",
       "summary": "guide.bypass.1777620.summary",

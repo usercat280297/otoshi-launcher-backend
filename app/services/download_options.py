@@ -208,27 +208,29 @@ def _aria2_available() -> bool:
 
 
 def list_download_methods(has_manifest: bool) -> list[dict]:
-    hf_enabled = bool(HF_REPO_ID and huggingface_fetcher.enabled() and has_manifest)
-    hf_code = None if hf_enabled else _hf_unavailable_code(has_manifest)
-    hf_note = None if hf_enabled else _hf_unavailable_reason(hf_code)
+    manifest_ready = bool(has_manifest)
+    hf_enabled = bool(HF_REPO_ID and huggingface_fetcher.enabled() and manifest_ready)
+    source_code = None if hf_enabled else _hf_unavailable_code(manifest_ready)
     aria2_enabled = _aria2_available()
-    aria2_code = None if aria2_enabled else "aria2_missing"
     aria2_note = None if aria2_enabled else "aria2c not found on client PATH"
     auto_note_parts = []
-    auto_note_keys = []
+    auto_note_keys: list[str] = []
     if not aria2_enabled:
         auto_note_parts.append("aria2c unavailable, fallback to internal downloader")
         auto_note_keys.append("aria2_missing")
-    if not hf_enabled:
+    if not manifest_ready:
+        auto_note_parts.append("Game manifest unavailable, waiting for update")
+        auto_note_keys.append("hf_manifest_missing")
+    if manifest_ready and not hf_enabled:
         auto_note_parts.append("HF chunks unavailable, fallback to direct CDN")
-        if hf_code:
-            auto_note_keys.append(hf_code)
+        if source_code:
+            auto_note_keys.append(source_code)
     auto_note = "; ".join(auto_note_parts) if auto_note_parts else None
     methods = [
         {
             "id": "auto",
-            "label": "Auto (recommended)",
-            "description": "Automatically choose the fastest stable engine and fallback safely.",
+            "label": "Auto",
+            "description": "Recommended max speed with smart fallback.",
             "recommended": True,
             "enabled": True,
             "note": auto_note,
@@ -236,33 +238,32 @@ def list_download_methods(has_manifest: bool) -> list[dict]:
             "availability_code": auto_note_keys[0] if auto_note_keys else None,
         },
         {
-            "id": "hf_chunks",
-            "label": "Hugging Face chunks",
-            "description": "Resume-friendly chunks with CDN fallback.",
-            "recommended": False,
-            "enabled": hf_enabled,
-            "note": hf_note,
-            "note_key": hf_code,
-            "availability_code": hf_code,
-        },
-        {
-            "id": "cdn_direct",
-            "label": "Direct CDN",
-            "description": "Single-stream download from the primary CDN.",
+            "id": "cdn",
+            "label": "CDN",
+            "description": "Stable direct CDN route.",
             "recommended": False,
             "enabled": True,
             "note_key": None,
             "availability_code": None,
         },
         {
-            "id": "aria2c",
-            "label": "aria2c multi-connection",
-            "description": "External aria2c engine for aggressive multi-connection download.",
+            "id": "balance",
+            "label": "Balance",
+            "description": "Balanced speed and stability.",
+            "recommended": False,
+            "enabled": True,
+            "note_key": None,
+            "availability_code": None,
+        },
+        {
+            "id": "max_speed",
+            "label": "Max speed",
+            "description": "Aggressive throughput profile.",
             "recommended": False,
             "enabled": aria2_enabled,
-            "note": aria2_note,
-            "note_key": aria2_code,
-            "availability_code": aria2_code,
+            "note": "Very high speed can hit upstream rate limits." if aria2_enabled else aria2_note,
+            "note_key": "max_speed_rate_limit_warning" if aria2_enabled else "aria2_missing",
+            "availability_code": None if aria2_enabled else "aria2_missing",
         },
     ]
     return methods
@@ -307,9 +308,22 @@ def ensure_install_directory(install_root: str, game_name: str, create_subfolder
     return str(root)
 
 
+_METHOD_ALIASES = {
+    "aria2c": "max_speed",
+    "cdn_direct": "cdn",
+    "hf_chunks": "balance",
+}
+
+
+def _normalize_method_id(method_id: str) -> str:
+    normalized = (method_id or "").strip().lower()
+    return _METHOD_ALIASES.get(normalized, normalized)
+
+
 def method_available(method_id: str, methods: Optional[list[dict]] = None) -> bool:
+    normalized_method_id = _normalize_method_id(method_id)
     check = methods if methods is not None else list_download_methods(True)
     for method in check:
-        if method.get("id") == method_id:
+        if str(method.get("id") or "").strip().lower() == normalized_method_id:
             return bool(method.get("enabled"))
     return False
