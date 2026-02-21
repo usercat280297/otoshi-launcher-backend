@@ -16,6 +16,9 @@ from .core.config import (
     WORKSHOP_STORAGE_DIR,
     SCREENSHOT_STORAGE_DIR,
     BUILD_STORAGE_DIR,
+    STEAM_GLOBAL_INDEX_BOOTSTRAP_ENABLED,
+    STEAM_GLOBAL_INDEX_BOOTSTRAP_MIN_TITLES,
+    STEAM_GLOBAL_INDEX_BOOTSTRAP_MAX_ITEMS,
     STEAMGRIDDB_PREWARM_CONCURRENCY,
     STEAMGRIDDB_PREWARM_ENABLED,
     STEAMGRIDDB_PREWARM_LIMIT,
@@ -28,7 +31,7 @@ from .migrations import ensure_schema
 from .seed import seed_games
 from .services.steam_catalog import get_lua_appids
 from .services.steamgriddb import prewarm_steamgriddb_cache
-from .services.steam_global_index import get_ingest_status
+from .services.steam_global_index import get_ingest_status, ingest_full_catalog
 from .routes import (
     auth,
     games,
@@ -165,6 +168,48 @@ def _start_lua_sync() -> None:
         print(f"Lua sync error: {e} (launcher will continue)")
 
 
+def _bootstrap_global_index_if_needed() -> None:
+    if not GLOBAL_INDEX_V1 or not STEAM_GLOBAL_INDEX_BOOTSTRAP_ENABLED:
+        return
+
+    min_titles = max(1, int(STEAM_GLOBAL_INDEX_BOOTSTRAP_MIN_TITLES or 0))
+    max_items = int(STEAM_GLOBAL_INDEX_BOOTSTRAP_MAX_ITEMS or 0)
+    max_items_value = max_items if max_items > 0 else None
+
+    db = SessionLocal()
+    try:
+        status = get_ingest_status(db)
+        latest_job = status.get("latest_job") or {}
+        totals = status.get("totals") or {}
+        current_titles = int(totals.get("titles") or 0)
+        job_status = str(latest_job.get("status") or "idle").strip().lower() or "idle"
+
+        if job_status == "running":
+            print("Global index bootstrap skipped (ingest already running)")
+            return
+
+        if current_titles >= min_titles:
+            print(
+                f"Global index bootstrap skipped (titles={current_titles}, min={min_titles})"
+            )
+            return
+
+        print(
+            f"Global index bootstrap started (titles={current_titles}, min={min_titles})"
+        )
+        result = ingest_full_catalog(db=db, max_items=max_items_value)
+        print(
+            "Global index bootstrap completed "
+            f"(processed={int(result.get('processed') or 0)}, "
+            f"success={int(result.get('success') or 0)}, "
+            f"failed={int(result.get('failed') or 0)})"
+        )
+    except Exception as exc:
+        print(f"Global index bootstrap failed: {exc}")
+    finally:
+        db.close()
+
+
 def _should_seed_sample_games() -> bool:
     """Seed demo/sample games only when explicitly enabled in packaged builds."""
     raw = os.getenv("SEED_SAMPLE_GAMES")
@@ -183,6 +228,8 @@ def on_startup() -> None:
 
     # Sync lua files in background to avoid blocking startup/port scan
     threading.Thread(target=_start_lua_sync, daemon=True).start()
+    if GLOBAL_INDEX_V1 and STEAM_GLOBAL_INDEX_BOOTSTRAP_ENABLED:
+        threading.Thread(target=_bootstrap_global_index_if_needed, daemon=True).start()
 
     if _should_seed_sample_games():
         db = SessionLocal()
