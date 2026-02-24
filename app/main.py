@@ -3,6 +3,7 @@ import os
 import re
 import sys
 import time
+from datetime import datetime, timezone
 from urllib.parse import unquote
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -26,6 +27,8 @@ from .core.config import (
     STEAM_GLOBAL_INDEX_AUTOSYNC_MAX_ITEMS,
     STEAM_GLOBAL_INDEX_AUTOSYNC_ENRICH_DETAILS,
     STEAM_GLOBAL_INDEX_AUTOSYNC_REQUIRE_API_KEY,
+    STEAM_GLOBAL_INDEX_AUTOSYNC_TARGET_MIN_TITLES,
+    STEAM_GLOBAL_INDEX_RUNNING_STALE_SECONDS,
     STEAM_WEB_API_KEY,
     STEAMGRIDDB_PREWARM_CONCURRENCY,
     STEAMGRIDDB_PREWARM_ENABLED,
@@ -34,13 +37,17 @@ from .core.config import (
 from .core.denuvo import DENUVO_APP_ID_SET
 from .core.cache import cache_client
 from .db import Base, engine, SessionLocal
-from .models import ChatMessage
+from .models import ChatMessage, IngestJob
 from .migrations import ensure_schema
 from .seed import seed_games
 from .services.steam_catalog import get_lua_appids
 from .services.ai_observability import record_http_request, should_track_request
 from .services.steamgriddb import prewarm_steamgriddb_cache
-from .services.steam_global_index import get_ingest_status, ingest_full_catalog
+from .services.steam_global_index import (
+    get_ingest_status,
+    ingest_full_catalog,
+    ingest_global_catalog,
+)
 from .routes import (
     auth,
     games,
@@ -207,6 +214,76 @@ def _start_lua_sync() -> None:
         print(f"Lua sync error: {e} (launcher will continue)")
 
 
+def _parse_status_timestamp(value: object) -> datetime | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    if raw.endswith("Z"):
+        raw = f"{raw[:-1]}+00:00"
+    try:
+        parsed = datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _recover_stale_running_ingest(
+    db,
+    latest_job: dict,
+    *,
+    context: str,
+) -> bool:
+    job_status = str(latest_job.get("status") or "idle").strip().lower() or "idle"
+    if job_status != "running":
+        return False
+
+    stale_after_seconds = max(60, int(STEAM_GLOBAL_INDEX_RUNNING_STALE_SECONDS or 0))
+    heartbeat = _parse_status_timestamp(latest_job.get("updated_at")) or _parse_status_timestamp(
+        latest_job.get("started_at")
+    )
+    if heartbeat is None:
+        return False
+
+    age_seconds = (datetime.now(timezone.utc) - heartbeat).total_seconds()
+    if age_seconds < stale_after_seconds:
+        return False
+
+    job_id = str(latest_job.get("id") or "").strip()
+    stale_job = None
+    if job_id:
+        stale_job = db.query(IngestJob).filter(IngestJob.id == job_id).first()
+    if stale_job is None:
+        stale_job = (
+            db.query(IngestJob)
+            .filter(IngestJob.job_type == "steam_global_catalog", IngestJob.status == "running")
+            .order_by(IngestJob.created_at.desc())
+            .first()
+        )
+    if stale_job is None or str(stale_job.status or "").strip().lower() != "running":
+        return False
+
+    stale_note = (
+        f"Auto-recovered stale ingest in {context} "
+        f"(age={int(age_seconds)}s, threshold={stale_after_seconds}s)"
+    )
+    meta = stale_job.meta if isinstance(stale_job.meta, dict) else {}
+    stale_job.meta = {
+        **meta,
+        "stale_recovered_at": datetime.utcnow().isoformat(),
+        "stale_recovered_by": context,
+        "stale_age_seconds": int(age_seconds),
+        "stale_threshold_seconds": stale_after_seconds,
+    }
+    stale_job.status = "failed"
+    stale_job.error_message = stale_note
+    stale_job.completed_at = datetime.utcnow()
+    db.commit()
+    print(stale_note)
+    return True
+
+
 def _bootstrap_global_index_if_needed() -> None:
     if not GLOBAL_INDEX_V1 or not STEAM_GLOBAL_INDEX_BOOTSTRAP_ENABLED:
         return
@@ -224,8 +301,14 @@ def _bootstrap_global_index_if_needed() -> None:
         job_status = str(latest_job.get("status") or "idle").strip().lower() or "idle"
 
         if job_status == "running":
-            print("Global index bootstrap skipped (ingest already running)")
-            return
+            recovered = _recover_stale_running_ingest(db, latest_job, context="bootstrap")
+            if recovered:
+                status = get_ingest_status(db)
+                latest_job = status.get("latest_job") or {}
+                job_status = str(latest_job.get("status") or "idle").strip().lower() or "idle"
+            if job_status == "running":
+                print("Global index bootstrap skipped (ingest already running)")
+                return
 
         if current_titles >= min_titles:
             print(
@@ -256,6 +339,7 @@ def _autosync_global_index_loop() -> None:
     interval_seconds = max(60, int(STEAM_GLOBAL_INDEX_AUTOSYNC_INTERVAL_SECONDS or 0))
     initial_delay_seconds = max(0, int(STEAM_GLOBAL_INDEX_AUTOSYNC_INITIAL_DELAY_SECONDS or 0))
     max_items = int(STEAM_GLOBAL_INDEX_AUTOSYNC_MAX_ITEMS or 0)
+    target_min_titles = max(1, int(STEAM_GLOBAL_INDEX_AUTOSYNC_TARGET_MIN_TITLES or 0))
     max_items_value = max_items if max_items > 0 else None
 
     if initial_delay_seconds > 0:
@@ -269,13 +353,23 @@ def _autosync_global_index_loop() -> None:
             else:
                 status = get_ingest_status(db)
                 latest_job = status.get("latest_job") or {}
+                totals = status.get("totals") or {}
+                current_titles = int(totals.get("titles") or 0)
                 job_status = str(latest_job.get("status") or "idle").strip().lower() or "idle"
+                if job_status == "running":
+                    recovered = _recover_stale_running_ingest(db, latest_job, context="autosync")
+                    if recovered:
+                        status = get_ingest_status(db)
+                        latest_job = status.get("latest_job") or {}
+                        job_status = str(latest_job.get("status") or "idle").strip().lower() or "idle"
                 if job_status == "running":
                     print("Global index autosync skipped (ingest already running)")
                 else:
+                    sync_reason = "backfill" if current_titles < target_min_titles else "maintenance"
                     print(
                         "Global index autosync started "
-                        f"(interval={interval_seconds}s, official_only={STEAM_GLOBAL_INDEX_AUTOSYNC_REQUIRE_API_KEY})"
+                        f"(interval={interval_seconds}s, official_only={STEAM_GLOBAL_INDEX_AUTOSYNC_REQUIRE_API_KEY}, "
+                        f"titles={current_titles}, target={target_min_titles}, reason={sync_reason})"
                     )
                     result = ingest_global_catalog(
                         db=db,

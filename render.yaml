@@ -50,6 +50,10 @@ services:
         value: "false"
       - key: STEAM_GLOBAL_INDEX_AUTOSYNC_MAX_ITEMS
         value: "0"
+      - key: STEAM_GLOBAL_INDEX_AUTOSYNC_TARGET_MIN_TITLES
+        value: "215000"
+      - key: STEAM_GLOBAL_INDEX_RUNNING_STALE_SECONDS
+        value: "1800"
       - key: STEAMGRIDDB_API_KEY
         sync: false
       - key: HUGGINGFACE_TOKEN

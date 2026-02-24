@@ -6,7 +6,7 @@ import time
 import subprocess
 from datetime import datetime
 from difflib import SequenceMatcher
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 from pathlib import Path
 
 import requests
@@ -1061,6 +1061,7 @@ def enforce_catalog_completeness(
     *,
     app_ids: Optional[List[str]] = None,
     max_items: Optional[int] = None,
+    progress_hook: Optional[Callable[[], None]] = None,
 ) -> Dict[str, int]:
     ensure_global_index_schema()
     query = db.query(SteamTitle)
@@ -1126,8 +1127,18 @@ def enforce_catalog_completeness(
         finally:
             stats["processed"] += 1
             if (index + 1) % 200 == 0:
+                if progress_hook:
+                    try:
+                        progress_hook()
+                    except Exception:
+                        pass
                 db.commit()
 
+    if progress_hook:
+        try:
+            progress_hook()
+        except Exception:
+            pass
     db.commit()
     return stats
 
@@ -1143,6 +1154,7 @@ def enrich_external_catalog_data(
     app_ids: List[str],
     *,
     force_refresh: bool = False,
+    progress_hook: Optional[Callable[[], None]] = None,
 ) -> Dict[str, int]:
     ensure_global_index_schema()
     normalized = [str(app_id) for app_id in app_ids if str(app_id).strip().isdigit()]
@@ -1228,8 +1240,18 @@ def enrich_external_catalog_data(
                 stats["cross_store_failed"] += 1
 
         if (index + 1) % 50 == 0:
+            if progress_hook:
+                try:
+                    progress_hook()
+                except Exception:
+                    pass
             db.commit()
 
+    if progress_hook:
+        try:
+            progress_hook()
+        except Exception:
+            pass
     db.commit()
     return stats
 
@@ -1680,6 +1702,21 @@ def ingest_global_catalog(
         "completion_cross_store_created": 0,
     }
 
+    def _update_job_progress(stage: str, extra_meta: Optional[Dict[str, Any]] = None) -> None:
+        current_meta = job.meta if isinstance(job.meta, dict) else {}
+        merged_meta: Dict[str, Any] = {
+            **current_meta,
+            "source": source,
+            "stage": stage,
+            "heartbeat_at": datetime.utcnow().isoformat(),
+        }
+        if extra_meta:
+            merged_meta.update(extra_meta)
+        job.meta = merged_meta
+        job.processed_count = processed
+        job.success_count = created_or_updated
+        job.failure_count = failed
+
     try:
         batch_size = max(10, STEAM_GLOBAL_INDEX_INGEST_BATCH)
         for start in range(0, len(apps), batch_size):
@@ -1707,28 +1744,61 @@ def ingest_global_catalog(
                 except Exception:
                     failed += 1
                 processed += 1
+            _update_job_progress(
+                "seed_ingest",
+                {
+                    "seed_processed": min(start + len(batch), len(apps)),
+                    "seed_total": len(apps),
+                },
+            )
             db.commit()
 
         detail_limit = min(len(appids_for_detail), max_items or len(appids_for_detail))
         if enrich_details:
-            for app_id in appids_for_detail[:detail_limit]:
+            detail_batch_size = max(25, batch_size)
+            for index, app_id in enumerate(appids_for_detail[:detail_limit], start=1):
                 try:
                     refresh_title_from_steam(db, app_id)
                 except Exception:
                     failed += 1
+                if index % detail_batch_size == 0:
+                    _update_job_progress(
+                        "detail_enrichment",
+                        {
+                            "detail_processed": index,
+                            "detail_total": detail_limit,
+                        },
+                    )
+                    db.commit()
+            _update_job_progress(
+                "detail_enrichment",
+                {
+                    "detail_processed": detail_limit,
+                    "detail_total": detail_limit,
+                },
+            )
             db.commit()
+            _update_job_progress("external_enrichment")
             external_stats = enrich_external_catalog_data(
                 db,
                 app_ids=appids_for_detail[:detail_limit],
                 force_refresh=False,
+                progress_hook=lambda: _update_job_progress("external_enrichment"),
             )
+            _update_job_progress(
+                "external_enrichment",
+                {"external_enrichment": external_stats},
+            )
+            db.commit()
 
         if STEAM_GLOBAL_INDEX_ENFORCE_COMPLETE:
             completion_ids = appids_for_detail[:detail_limit] if appids_for_detail else None
+            _update_job_progress("completeness_enforcement")
             completion_stats = enforce_catalog_completeness(
                 db,
                 app_ids=completion_ids,
                 max_items=max_items,
+                progress_hook=lambda: _update_job_progress("completeness_enforcement"),
             )
             external_stats.update(
                 {
@@ -1739,10 +1809,16 @@ def ingest_global_catalog(
                     "completion_cross_store_created": int(completion_stats.get("cross_store_created") or 0),
                 }
             )
+            _update_job_progress(
+                "completeness_enforcement",
+                {"external_enrichment": external_stats},
+            )
+            db.commit()
 
         job.meta = {
             **(job.meta or {}),
             "source": source,
+            "stage": "completed",
             "external_enrichment": external_stats,
         }
 
@@ -1756,8 +1832,7 @@ def ingest_global_catalog(
         db.rollback()
         job.status = "failed"
         job.error_message = str(exc)
-        job.processed_count = processed
-        job.success_count = created_or_updated
+        _update_job_progress("failed")
         job.failure_count = failed + 1
         job.completed_at = datetime.utcnow()
         db.commit()
@@ -2645,10 +2720,12 @@ def get_ingest_status(db: Session) -> Dict[str, Any]:
             "latest_job": {
                 "id": latest.id if latest else None,
                 "status": latest.status if latest else "idle",
+                "source": latest.source if latest else None,
                 "processed_count": latest.processed_count if latest else 0,
                 "success_count": latest.success_count if latest else 0,
                 "failure_count": latest.failure_count if latest else 0,
                 "started_at": latest.started_at.isoformat() if latest and latest.started_at else None,
+                "updated_at": latest.updated_at.isoformat() if latest and latest.updated_at else None,
                 "completed_at": latest.completed_at.isoformat() if latest and latest.completed_at else None,
                 "error_message": latest.error_message if latest else None,
                 "phase": latest_meta.get("phase") if isinstance(latest_meta, dict) else None,
