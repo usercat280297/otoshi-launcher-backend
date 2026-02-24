@@ -1334,6 +1334,62 @@ def _fetch_steam_app_list_via_go_worker() -> List[Dict[str, Any]]:
     return normalized
 
 
+def _fetch_steam_store_applist_variant(params: Dict[str, Any]) -> List[Dict[str, Any]]:
+    all_apps: List[Dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    last_appid = 0
+    safety_pages = 500
+    for _ in range(safety_pages):
+        request_params: Dict[str, Any] = {
+            "key": STEAM_WEB_API_KEY,
+            "max_results": 50000,
+            "last_appid": last_appid,
+        }
+        request_params.update(params or {})
+        try:
+            response = requests.get(
+                _steam_store_applist_url(),
+                params=request_params,
+                timeout=max(STEAM_REQUEST_TIMEOUT_SECONDS, 20),
+                headers={"User-Agent": "otoshi-launcher/1.0"},
+            )
+            if response.status_code != 200:
+                break
+            payload = response.json()
+        except (requests.RequestException, ValueError):
+            break
+
+        api_apps = ((payload or {}).get("response", {}) or {}).get("apps", [])
+        if not isinstance(api_apps, list) or not api_apps:
+            break
+
+        page_added = 0
+        for item in api_apps:
+            if not isinstance(item, dict):
+                continue
+            appid = item.get("appid")
+            name = str(item.get("name") or "").strip()
+            if not appid or not name:
+                continue
+            app_id = str(appid)
+            if app_id in seen_ids:
+                continue
+            seen_ids.add(app_id)
+            all_apps.append({"app_id": app_id, "name": name})
+            page_added += 1
+
+        response_obj = (payload or {}).get("response", {}) or {}
+        have_more = bool(response_obj.get("have_more_results"))
+        next_last_appid = int(response_obj.get("last_appid") or 0)
+        if not have_more or next_last_appid <= 0 or page_added <= 0:
+            break
+        if next_last_appid <= last_appid:
+            break
+        last_appid = next_last_appid
+
+    return all_apps
+
+
 def fetch_steam_app_list(official_only: bool = False) -> List[Dict[str, Any]]:
     if not official_only:
         via_go_worker = _fetch_steam_app_list_via_go_worker()
@@ -1342,63 +1398,46 @@ def fetch_steam_app_list(official_only: bool = False) -> List[Dict[str, Any]]:
 
     # Preferred source: IStoreService endpoint with pagination and API key.
     if STEAM_WEB_API_KEY:
-        all_apps: List[Dict[str, Any]] = []
-        seen_ids: set[str] = set()
-        last_appid = 0
-        safety_pages = 500
-        for _ in range(safety_pages):
-            try:
-                response = requests.get(
-                    _steam_store_applist_url(),
-                    params={
-                        "key": STEAM_WEB_API_KEY,
-                        "max_results": 50000,
-                        "last_appid": last_appid,
-                        "include_games": True,
-                        "include_dlc": True,
-                        "include_software": True,
-                        "include_videos": False,
-                        "include_hardware": False,
-                    },
-                    timeout=max(STEAM_REQUEST_TIMEOUT_SECONDS, 20),
-                    headers={"User-Agent": "otoshi-launcher/1.0"},
-                )
-                if response.status_code != 200:
-                    break
-                payload = response.json()
-            except (requests.RequestException, ValueError):
-                break
-
-            api_apps = ((payload or {}).get("response", {}) or {}).get("apps", [])
-            if not isinstance(api_apps, list) or not api_apps:
-                break
-
-            page_added = 0
-            for item in api_apps:
-                if not isinstance(item, dict):
-                    continue
-                appid = item.get("appid")
+        merged: Dict[str, Dict[str, Any]] = {}
+        # Variant 1: public-facing store content types.
+        # Variant 2: all-false flags return a broader app registry on Steam API.
+        # We merge both to maximize official coverage while keeping one source.
+        query_variants = (
+            {
+                "include_games": True,
+                "include_dlc": True,
+                "include_software": True,
+                "include_videos": True,
+                "include_hardware": True,
+            },
+            {
+                "include_games": False,
+                "include_dlc": False,
+                "include_software": False,
+                "include_videos": False,
+                "include_hardware": False,
+            },
+        )
+        for variant in query_variants:
+            variant_apps = _fetch_steam_store_applist_variant(variant)
+            for item in variant_apps:
+                app_id = str(item.get("app_id") or "").strip()
                 name = str(item.get("name") or "").strip()
-                if not appid or not name:
+                if not app_id.isdigit() or not name:
                     continue
-                app_id = str(appid)
-                if app_id in seen_ids:
+                existing = merged.get(app_id)
+                if existing is None:
+                    merged[app_id] = {"app_id": app_id, "name": name}
                     continue
-                seen_ids.add(app_id)
-                all_apps.append({"app_id": app_id, "name": name})
-                page_added += 1
+                merged_name = _pick_best_title_name(
+                    app_id,
+                    existing.get("name"),
+                    name,
+                )
+                merged[app_id] = {"app_id": app_id, "name": merged_name}
 
-            response_obj = (payload or {}).get("response", {}) or {}
-            have_more = bool(response_obj.get("have_more_results"))
-            next_last_appid = int(response_obj.get("last_appid") or 0)
-            if not have_more or next_last_appid <= 0 or page_added <= 0:
-                break
-            if next_last_appid <= last_appid:
-                break
-            last_appid = next_last_appid
-
-        if all_apps:
-            return all_apps
+        if merged:
+            return sorted(merged.values(), key=lambda row: int(row["app_id"]))
         if official_only:
             return []
 
