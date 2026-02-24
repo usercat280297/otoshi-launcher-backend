@@ -79,6 +79,8 @@ _BYPASS_PRIORITY_APPIDS: List[str] = []
 _ONLINE_FIX_PRIORITY_LOCK = Lock()
 _ONLINE_FIX_PRIORITY_CACHE_MTIME: Optional[float] = None
 _ONLINE_FIX_PRIORITY_APPIDS: List[str] = []
+_LUA_FALLBACK_SEED_RETRY_ATTEMPTS = 15
+_LUA_FALLBACK_SEED_RETRY_DELAY_SECONDS = 2
 
 
 def _looks_like_generic_epic_badge(url: str) -> bool:
@@ -1417,6 +1419,23 @@ def _fallback_apps_from_lua(max_items: Optional[int] = None) -> List[Dict[str, A
     return apps
 
 
+def _resolve_ingest_seed_apps(max_items: Optional[int] = None) -> Tuple[List[Dict[str, Any]], str]:
+    """Resolve the initial app list for ingest, with resilient Lua fallback retries."""
+    apps = fetch_steam_app_list()
+    if apps:
+        return apps, "steam_api"
+
+    # Startup can race with async Lua sync; poll fallback briefly before giving up.
+    for attempt in range(max(1, int(_LUA_FALLBACK_SEED_RETRY_ATTEMPTS))):
+        fallback_apps = _fallback_apps_from_lua(max_items=max_items)
+        if fallback_apps:
+            return fallback_apps, "lua_fallback"
+        if attempt < _LUA_FALLBACK_SEED_RETRY_ATTEMPTS - 1:
+            time.sleep(max(0, int(_LUA_FALLBACK_SEED_RETRY_DELAY_SECONDS)))
+
+    return [], "lua_fallback"
+
+
 def _upsert_alias(db: Session, title_id: str, alias: str, locale: str = "en", source: str = "steam") -> None:
     normalized = normalize_title(alias)
     if not normalized:
@@ -1583,13 +1602,9 @@ def ingest_global_catalog(
     db.commit()
     db.refresh(job)
 
-    apps = fetch_steam_app_list()
-    source = "steam_api"
-    if not apps:
-        apps = _fallback_apps_from_lua(max_items=max_items)
-        source = "lua_fallback"
-        job.source = source
-        db.commit()
+    apps, source = _resolve_ingest_seed_apps(max_items=max_items)
+    job.source = source
+    db.commit()
     if max_items and max_items > 0:
         apps = apps[: max_items]
 
