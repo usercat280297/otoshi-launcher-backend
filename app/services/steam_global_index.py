@@ -72,6 +72,7 @@ _EPIC_CACHE_LOCK = Lock()
 _EPIC_CANDIDATE_CACHE: Dict[str, Any] = {"loaded_at": 0.0, "items": []}
 _BYPASS_CATEGORIES_FILE = Path(__file__).resolve().parents[1] / "data" / "bypass_categories.json"
 _ONLINE_FIX_FILE = Path(__file__).resolve().parents[1] / "data" / "online_fix.json"
+_STEAM_APP_SEED_FILE = Path(__file__).resolve().parents[1] / "data" / "steam_app_seed.json"
 _BYPASS_PRIORITY_CATEGORY_ORDER = ("others", "ea", "ubisoft", "rockstar")
 _BYPASS_PRIORITY_LOCK = Lock()
 _BYPASS_PRIORITY_CACHE_MTIME: Optional[float] = None
@@ -1371,7 +1372,9 @@ def fetch_steam_app_list() -> List[Dict[str, Any]]:
         if not appid or not name:
             continue
         filtered.append({"app_id": str(appid), "name": name})
-    return filtered
+    if filtered:
+        return filtered
+    return []
 
 
 def _read_manifest_name_map() -> Dict[str, str]:
@@ -1419,11 +1422,44 @@ def _fallback_apps_from_lua(max_items: Optional[int] = None) -> List[Dict[str, A
     return apps
 
 
+def _load_seed_app_list(max_items: Optional[int] = None) -> List[Dict[str, Any]]:
+    """Load bundled Steam app seed when upstream APIs are unavailable."""
+    try:
+        raw = json.loads(_STEAM_APP_SEED_FILE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+
+    raw_items = raw.get("items") if isinstance(raw, dict) else None
+    if not isinstance(raw_items, list):
+        return []
+
+    out: List[Dict[str, Any]] = []
+    for entry in raw_items:
+        app_id = ""
+        name = ""
+        if isinstance(entry, list) and len(entry) >= 2:
+            app_id = str(entry[0] or "").strip()
+            name = str(entry[1] or "").strip()
+        elif isinstance(entry, dict):
+            app_id = str(entry.get("app_id") or entry.get("appid") or "").strip()
+            name = str(entry.get("name") or "").strip()
+        if not app_id.isdigit() or not name:
+            continue
+        out.append({"app_id": app_id, "name": name})
+        if max_items and max_items > 0 and len(out) >= max_items:
+            break
+    return out
+
+
 def _resolve_ingest_seed_apps(max_items: Optional[int] = None) -> Tuple[List[Dict[str, Any]], str]:
-    """Resolve the initial app list for ingest, with resilient Lua fallback retries."""
+    """Resolve the initial app list for ingest with layered fallbacks."""
     apps = fetch_steam_app_list()
     if apps:
         return apps, "steam_api"
+
+    seed_apps = _load_seed_app_list(max_items=max_items)
+    if seed_apps:
+        return seed_apps, "bundled_seed"
 
     # Startup can race with async Lua sync; poll fallback briefly before giving up.
     for attempt in range(max(1, int(_LUA_FALLBACK_SEED_RETRY_ATTEMPTS))):
