@@ -20,6 +20,13 @@ from .core.config import (
     STEAM_GLOBAL_INDEX_BOOTSTRAP_ENABLED,
     STEAM_GLOBAL_INDEX_BOOTSTRAP_MIN_TITLES,
     STEAM_GLOBAL_INDEX_BOOTSTRAP_MAX_ITEMS,
+    STEAM_GLOBAL_INDEX_AUTOSYNC_ENABLED,
+    STEAM_GLOBAL_INDEX_AUTOSYNC_INTERVAL_SECONDS,
+    STEAM_GLOBAL_INDEX_AUTOSYNC_INITIAL_DELAY_SECONDS,
+    STEAM_GLOBAL_INDEX_AUTOSYNC_MAX_ITEMS,
+    STEAM_GLOBAL_INDEX_AUTOSYNC_ENRICH_DETAILS,
+    STEAM_GLOBAL_INDEX_AUTOSYNC_REQUIRE_API_KEY,
+    STEAM_WEB_API_KEY,
     STEAMGRIDDB_PREWARM_CONCURRENCY,
     STEAMGRIDDB_PREWARM_ENABLED,
     STEAMGRIDDB_PREWARM_LIMIT,
@@ -242,6 +249,54 @@ def _bootstrap_global_index_if_needed() -> None:
         db.close()
 
 
+def _autosync_global_index_loop() -> None:
+    if not GLOBAL_INDEX_V1 or not STEAM_GLOBAL_INDEX_AUTOSYNC_ENABLED:
+        return
+
+    interval_seconds = max(60, int(STEAM_GLOBAL_INDEX_AUTOSYNC_INTERVAL_SECONDS or 0))
+    initial_delay_seconds = max(0, int(STEAM_GLOBAL_INDEX_AUTOSYNC_INITIAL_DELAY_SECONDS or 0))
+    max_items = int(STEAM_GLOBAL_INDEX_AUTOSYNC_MAX_ITEMS or 0)
+    max_items_value = max_items if max_items > 0 else None
+
+    if initial_delay_seconds > 0:
+        time.sleep(initial_delay_seconds)
+
+    while True:
+        db = SessionLocal()
+        try:
+            if STEAM_GLOBAL_INDEX_AUTOSYNC_REQUIRE_API_KEY and not str(STEAM_WEB_API_KEY or "").strip():
+                print("Global index autosync skipped (STEAM_WEB_API_KEY missing)")
+            else:
+                status = get_ingest_status(db)
+                latest_job = status.get("latest_job") or {}
+                job_status = str(latest_job.get("status") or "idle").strip().lower() or "idle"
+                if job_status == "running":
+                    print("Global index autosync skipped (ingest already running)")
+                else:
+                    print(
+                        "Global index autosync started "
+                        f"(interval={interval_seconds}s, official_only={STEAM_GLOBAL_INDEX_AUTOSYNC_REQUIRE_API_KEY})"
+                    )
+                    result = ingest_global_catalog(
+                        db=db,
+                        max_items=max_items_value,
+                        enrich_details=STEAM_GLOBAL_INDEX_AUTOSYNC_ENRICH_DETAILS,
+                        official_only=STEAM_GLOBAL_INDEX_AUTOSYNC_REQUIRE_API_KEY,
+                    )
+                    print(
+                        "Global index autosync completed "
+                        f"(processed={int(result.get('processed') or 0)}, "
+                        f"success={int(result.get('success') or 0)}, "
+                        f"failed={int(result.get('failed') or 0)})"
+                    )
+        except Exception as exc:
+            print(f"Global index autosync failed: {exc}")
+        finally:
+            db.close()
+
+        time.sleep(interval_seconds)
+
+
 def _should_seed_sample_games() -> bool:
     """Seed demo/sample games only when explicitly enabled in packaged builds."""
     raw = os.getenv("SEED_SAMPLE_GAMES")
@@ -262,6 +317,8 @@ def on_startup() -> None:
     threading.Thread(target=_start_lua_sync, daemon=True).start()
     if GLOBAL_INDEX_V1 and STEAM_GLOBAL_INDEX_BOOTSTRAP_ENABLED:
         threading.Thread(target=_bootstrap_global_index_if_needed, daemon=True).start()
+    if GLOBAL_INDEX_V1 and STEAM_GLOBAL_INDEX_AUTOSYNC_ENABLED:
+        threading.Thread(target=_autosync_global_index_loop, daemon=True).start()
 
     if _should_seed_sample_games():
         db = SessionLocal()

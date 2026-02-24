@@ -1278,10 +1278,11 @@ def _fetch_steam_app_list_via_go_worker() -> List[Dict[str, Any]]:
     return normalized
 
 
-def fetch_steam_app_list() -> List[Dict[str, Any]]:
-    via_go_worker = _fetch_steam_app_list_via_go_worker()
-    if via_go_worker:
-        return via_go_worker
+def fetch_steam_app_list(official_only: bool = False) -> List[Dict[str, Any]]:
+    if not official_only:
+        via_go_worker = _fetch_steam_app_list_via_go_worker()
+        if via_go_worker:
+            return via_go_worker
 
     # Preferred source: IStoreService endpoint with pagination and API key.
     if STEAM_WEB_API_KEY:
@@ -1342,6 +1343,11 @@ def fetch_steam_app_list() -> List[Dict[str, Any]]:
 
         if all_apps:
             return all_apps
+        if official_only:
+            return []
+
+    if official_only:
+        return []
 
     # Legacy fallback: older ISteamApps endpoint.
     try:
@@ -1451,11 +1457,17 @@ def _load_seed_app_list(max_items: Optional[int] = None) -> List[Dict[str, Any]]
     return out
 
 
-def _resolve_ingest_seed_apps(max_items: Optional[int] = None) -> Tuple[List[Dict[str, Any]], str]:
+def _resolve_ingest_seed_apps(
+    max_items: Optional[int] = None,
+    official_only: bool = False,
+) -> Tuple[List[Dict[str, Any]], str]:
     """Resolve the initial app list for ingest with layered fallbacks."""
-    apps = fetch_steam_app_list()
+    apps = fetch_steam_app_list(official_only=official_only)
     if apps:
         return apps, "steam_api"
+
+    if official_only:
+        return [], "steam_api"
 
     seed_apps = _load_seed_app_list(max_items=max_items)
     if seed_apps:
@@ -1624,6 +1636,7 @@ def ingest_global_catalog(
     db: Session,
     max_items: Optional[int] = None,
     enrich_details: bool = True,
+    official_only: bool = False,
 ) -> Dict[str, Any]:
     ensure_global_index_schema()
     started = datetime.utcnow()
@@ -1632,13 +1645,20 @@ def ingest_global_catalog(
         status="running",
         source="steam_api",
         started_at=started,
-        meta={"max_items": max_items, "enrich_details": enrich_details},
+        meta={
+            "max_items": max_items,
+            "enrich_details": enrich_details,
+            "official_only": bool(official_only),
+        },
     )
     db.add(job)
     db.commit()
     db.refresh(job)
 
-    apps, source = _resolve_ingest_seed_apps(max_items=max_items)
+    apps, source = _resolve_ingest_seed_apps(
+        max_items=max_items,
+        official_only=official_only,
+    )
     job.source = source
     db.commit()
     if max_items and max_items > 0:

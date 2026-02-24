@@ -38,6 +38,18 @@ services:
         sync: false
       - key: STEAM_WEB_API_KEY
         sync: false
+      - key: STEAM_GLOBAL_INDEX_AUTOSYNC_ENABLED
+        value: "true"
+      - key: STEAM_GLOBAL_INDEX_AUTOSYNC_REQUIRE_API_KEY
+        value: "true"
+      - key: STEAM_GLOBAL_INDEX_AUTOSYNC_INTERVAL_SECONDS
+        value: "900"
+      - key: STEAM_GLOBAL_INDEX_AUTOSYNC_INITIAL_DELAY_SECONDS
+        value: "60"
+      - key: STEAM_GLOBAL_INDEX_AUTOSYNC_ENRICH_DETAILS
+        value: "false"
+      - key: STEAM_GLOBAL_INDEX_AUTOSYNC_MAX_ITEMS
+        value: "0"
       - key: STEAMGRIDDB_API_KEY
         sync: false
       - key: HUGGINGFACE_TOKEN
