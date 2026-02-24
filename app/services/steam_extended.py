@@ -5,7 +5,7 @@ Steam Extended API - DLC, Achievements, News, and Updates
 from __future__ import annotations
 
 import logging
-from typing import Optional, List
+from typing import Optional, List, Dict
 from hashlib import sha1
 from difflib import SequenceMatcher
 from email.utils import parsedate_to_datetime
@@ -21,6 +21,7 @@ from ..core.config import (
     STEAM_CACHE_TTL_SECONDS,
     STEAM_REQUEST_TIMEOUT_SECONDS,
     STEAM_STORE_API_URL,
+    STEAM_STORE_SEARCH_URL,
     STEAM_WEB_API_KEY,
     STEAM_WEB_API_URL,
     STEAM_NEWS_MAX_COUNT,
@@ -29,6 +30,36 @@ from ..core.config import (
 logger = logging.getLogger(__name__)
 
 TAG_RE = re.compile(r"<[^>]+>")
+APP_ID_RE = re.compile(r"\d+")
+STORE_DLC_LINK_RE = re.compile(r"/app/(\d+)")
+
+
+def _as_app_id(value: object) -> Optional[str]:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    match = APP_ID_RE.fullmatch(text)
+    if not match:
+        return None
+    return match.group(0)
+
+
+def _normalize_name(value: Optional[str]) -> str:
+    return " ".join(str(value or "").strip().lower().split())
+
+
+def _name_looks_like_demo(name: str) -> bool:
+    return "demo" in _normalize_name(name)
+
+
+def _name_looks_related_to_base(base_name: Optional[str], candidate_name: Optional[str]) -> bool:
+    base = _normalize_name(base_name)
+    candidate = _normalize_name(candidate_name)
+    if not base or not candidate:
+        return False
+    if candidate == base:
+        return False
+    return base in candidate
 
 
 def _strip_html(value: Optional[str]) -> Optional[str]:
@@ -242,6 +273,174 @@ def _request(url: str, params: dict) -> Optional[dict]:
         return None
 
 
+def _discover_dlc_from_packages(app_id: str, base_data: dict) -> Dict[str, str]:
+    package_ids: List[str] = []
+    seen_packages: set[str] = set()
+    discovered: Dict[str, str] = {}
+
+    for raw in (base_data.get("packages") or []):
+        package_id = _as_app_id(raw)
+        if package_id and package_id not in seen_packages:
+            seen_packages.add(package_id)
+            package_ids.append(package_id)
+
+    for group in (base_data.get("package_groups") or []):
+        if not isinstance(group, dict):
+            continue
+        for sub in (group.get("subs") or []):
+            if not isinstance(sub, dict):
+                continue
+            package_id = _as_app_id(sub.get("packageid"))
+            if package_id and package_id not in seen_packages:
+                seen_packages.add(package_id)
+                package_ids.append(package_id)
+
+    if not package_ids:
+        return discovered
+
+    package_url = f"{STEAM_STORE_API_URL.rstrip('/')}/packagedetails"
+    batch_size = 20
+    for index in range(0, len(package_ids), batch_size):
+        batch = package_ids[index:index + batch_size]
+        payload = _request(
+            package_url,
+            {
+                "packageids": ",".join(batch),
+                "cc": "us",
+                "l": "en",
+            },
+        )
+        if not payload:
+            continue
+
+        for package_id in batch:
+            package_node = payload.get(str(package_id), {})
+            if not isinstance(package_node, dict) or not package_node.get("success"):
+                continue
+            package_data = package_node.get("data") or {}
+            for app in (package_data.get("apps") or []):
+                if not isinstance(app, dict):
+                    continue
+                candidate_id = _as_app_id(app.get("id") or app.get("appid"))
+                if not candidate_id or candidate_id == app_id:
+                    continue
+                name = str(app.get("name") or "").strip()
+                if _name_looks_like_demo(name):
+                    continue
+                if candidate_id not in discovered:
+                    discovered[candidate_id] = name
+    return discovered
+
+
+def _discover_dlc_from_store_dlc_page(app_id: str) -> Dict[str, str]:
+    discovered: Dict[str, str] = {}
+    url = f"https://store.steampowered.com/dlc/{app_id}/"
+    try:
+        response = requests.get(
+            url,
+            params={"cc": "us", "l": "en"},
+            timeout=STEAM_REQUEST_TIMEOUT_SECONDS,
+            headers={"User-Agent": "otoshi-launcher/1.0"},
+        )
+    except requests.RequestException:
+        return discovered
+
+    if response.status_code not in (200, 206):
+        return discovered
+
+    html = response.text or ""
+    if not html:
+        return discovered
+
+    soup = BeautifulSoup(html, "html.parser")
+    for node in soup.select("[data-ds-appid]"):
+        raw = str(node.get("data-ds-appid") or "")
+        ids = APP_ID_RE.findall(raw)
+        if not ids:
+            continue
+        name_node = node.select_one(".tab_item_name")
+        name = ""
+        if name_node:
+            name = name_node.get_text(" ", strip=True)
+        for candidate_id in ids:
+            normalized_id = _as_app_id(candidate_id)
+            if not normalized_id or normalized_id == app_id:
+                continue
+            if _name_looks_like_demo(name):
+                continue
+            if normalized_id not in discovered:
+                discovered[normalized_id] = name
+
+    # Backup regex extraction in case data-ds-appid parsing misses some cards.
+    for candidate_id in STORE_DLC_LINK_RE.findall(html):
+        normalized_id = _as_app_id(candidate_id)
+        if not normalized_id or normalized_id == app_id:
+            continue
+        discovered.setdefault(normalized_id, "")
+
+    return discovered
+
+
+def _discover_dlc_from_store_search(app_id: str, base_name: Optional[str]) -> Dict[str, str]:
+    discovered: Dict[str, str] = {}
+    if not base_name:
+        return discovered
+
+    search_url = STEAM_STORE_SEARCH_URL.rstrip("/")
+    payload = _request(
+        search_url,
+        {
+            "term": base_name,
+            "cc": "us",
+            "l": "en",
+        },
+    )
+    if not payload:
+        return discovered
+
+    for item in (payload.get("items") or []):
+        if not isinstance(item, dict):
+            continue
+        candidate_id = _as_app_id(item.get("id") or item.get("appid"))
+        if not candidate_id or candidate_id == app_id:
+            continue
+        name = str(item.get("name") or "").strip()
+        if not name or _name_looks_like_demo(name):
+            continue
+        item_type = str(item.get("type") or "").strip().lower()
+        if item_type and item_type != "dlc" and not _name_looks_related_to_base(base_name, name):
+            continue
+        if not _name_looks_related_to_base(base_name, name):
+            continue
+        discovered.setdefault(candidate_id, name)
+
+    return discovered
+
+
+def _discover_dlc_candidates(app_id: str, base_data: dict) -> Dict[str, str]:
+    discovered: Dict[str, str] = {}
+    base_name = str(base_data.get("name") or "").strip()
+
+    for source in (
+        _discover_dlc_from_packages(app_id, base_data),
+        _discover_dlc_from_store_dlc_page(app_id),
+        _discover_dlc_from_store_search(app_id, base_name),
+    ):
+        for candidate_id, candidate_name in source.items():
+            normalized_id = _as_app_id(candidate_id)
+            if not normalized_id or normalized_id == app_id:
+                continue
+            if _name_looks_like_demo(candidate_name):
+                continue
+            existing_name = discovered.get(normalized_id, "")
+            if not existing_name and candidate_name:
+                discovered[normalized_id] = candidate_name
+            elif normalized_id not in discovered:
+                discovered[normalized_id] = candidate_name
+
+    return discovered
+
+
 def get_steam_dlc(app_id: str) -> List[dict]:
     """
     Fetch DLC list for a Steam game
@@ -278,7 +477,20 @@ def get_steam_dlc(app_id: str) -> List[dict]:
         return []
 
     data = app_data.get("data", {})
-    dlc_ids = data.get("dlc", [])
+    direct_dlc_ids: List[str] = []
+    seen_dlc_ids: set[str] = set()
+    for raw_dlc_id in (data.get("dlc") or []):
+        dlc_id = _as_app_id(raw_dlc_id)
+        if not dlc_id or dlc_id == app_id or dlc_id in seen_dlc_ids:
+            continue
+        seen_dlc_ids.add(dlc_id)
+        direct_dlc_ids.append(dlc_id)
+
+    discovered_dlc_candidates: Dict[str, str] = {}
+    dlc_ids = list(direct_dlc_ids)
+    if not dlc_ids:
+        discovered_dlc_candidates = _discover_dlc_candidates(app_id, data)
+        dlc_ids = list(discovered_dlc_candidates.keys())
 
     if not dlc_ids:
         cache_client.set_json(cache_key, [], ttl=STEAM_CACHE_TTL_SECONDS)
@@ -306,6 +518,10 @@ def get_steam_dlc(app_id: str) -> List[dict]:
         for dlc_id in batch_ids:
             dlc_data = dlc_payload.get(str(dlc_id), {})
             dlc_info = dlc_data.get("data", {}) if dlc_data.get("success") else {}
+            discovered_name = str(discovered_dlc_candidates.get(str(dlc_id), "") or "").strip()
+            dlc_type = str(dlc_info.get("type") or "").strip().lower()
+            if dlc_type and dlc_type != "dlc":
+                continue
 
             price_overview = dlc_info.get("price_overview")
             price = None
@@ -334,7 +550,7 @@ def get_steam_dlc(app_id: str) -> List[dict]:
 
             fallback_header = f"https://cdn.cloudflare.steamstatic.com/steam/apps/{dlc_id}/header.jpg"
             header_image = _resolve_dlc_image(dlc_info, str(dlc_id))
-            name = dlc_info.get("name", f"DLC {dlc_id}")
+            name = dlc_info.get("name") or discovered_name or f"DLC {dlc_id}"
 
             needs_meta = (
                 not header_image

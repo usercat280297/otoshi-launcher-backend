@@ -1,6 +1,8 @@
 from sqlalchemy import inspect, text
 
+from .core.config import AI_SEARCH_VECTOR_DIM
 from .db import engine
+from .services.vector_store import mark_pgvector_schema_changed
 
 
 def _bool_default(value: bool) -> str:
@@ -227,6 +229,8 @@ def ensure_schema() -> None:
                 )
             )
 
+    _ensure_pgvector_schema(max(16, int(AI_SEARCH_VECTOR_DIM or 128)))
+
 
 def _apply_alters(statements: list[str]) -> None:
     if not statements:
@@ -234,3 +238,84 @@ def _apply_alters(statements: list[str]) -> None:
     with engine.begin() as connection:
         for statement in statements:
             connection.execute(text(statement))
+
+
+def _ensure_pgvector_schema(dimension: int) -> None:
+    if engine.dialect.name != "postgresql":
+        return
+    inspector = inspect(engine)
+    tables = set(inspector.get_table_names())
+    required_tables = {"game_embeddings", "query_embedding_cache"}
+    if not required_tables.issubset(tables):
+        return
+
+    if dimension <= 0:
+        dimension = 128
+    vector_type = f"vector({int(dimension)})"
+    lists = max(16, min(512, int(max(1, dimension) ** 0.5) * 8))
+    schema_changed = False
+
+    try:
+        with engine.begin() as connection:
+            connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+
+            game_columns = {col["name"] for col in inspector.get_columns("game_embeddings")}
+            if "vector_v" not in game_columns:
+                connection.execute(
+                    text(f"ALTER TABLE game_embeddings ADD COLUMN vector_v {vector_type}")
+                )
+                schema_changed = True
+            connection.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_game_embeddings_vector_v_ivfflat "
+                    "ON game_embeddings USING ivfflat (vector_v vector_cosine_ops) "
+                    f"WITH (lists = {lists})"
+                )
+            )
+            _backfill_pgvector_column(connection, "game_embeddings", int(dimension))
+
+            query_columns = {col["name"] for col in inspector.get_columns("query_embedding_cache")}
+            if "vector_v" not in query_columns:
+                connection.execute(
+                    text(f"ALTER TABLE query_embedding_cache ADD COLUMN vector_v {vector_type}")
+                )
+                schema_changed = True
+            connection.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_query_embedding_cache_vector_v_ivfflat "
+                    "ON query_embedding_cache USING ivfflat (vector_v vector_cosine_ops) "
+                    f"WITH (lists = {lists})"
+                )
+            )
+            _backfill_pgvector_column(connection, "query_embedding_cache", int(dimension))
+    except Exception:
+        # Keep startup healthy on managed Postgres where extension/index permissions are restricted.
+        return
+
+    if schema_changed:
+        with engine.begin() as connection:
+            connection.execute(text("ANALYZE game_embeddings"))
+            connection.execute(text("ANALYZE query_embedding_cache"))
+        with engine.connect() as db_connection:
+            mark_pgvector_schema_changed(db_connection)
+
+
+def _backfill_pgvector_column(connection, table_name: str, dimension: int) -> None:
+    connection.execute(
+        text(
+            f"""
+            UPDATE {table_name}
+            SET vector_v = (
+                '[' || array_to_string(
+                    ARRAY(SELECT jsonb_array_elements_text(vector::jsonb)),
+                    ','
+                ) || ']'
+            )::vector
+            WHERE vector_v IS NULL
+              AND vector IS NOT NULL
+              AND jsonb_typeof(vector::jsonb) = 'array'
+              AND jsonb_array_length(vector::jsonb) = :dimension
+            """
+        ),
+        {"dimension": int(dimension)},
+    )

@@ -12,8 +12,10 @@ from ..schemas import (
     AnimeHomeOut,
     AnimeItemOut,
     GameOut,
+    SteamCatalogOut,
 )
-from ..core.config import DISCOVERY_FORCE_STEAM
+from ..core.config import AI_FEATURE_RECO_V2, DISCOVERY_FORCE_STEAM
+from ..services.ai_recommendations import recommend_v2
 from ..services.recommendations import recommend_games, similar_games
 from ..services.steam_catalog import get_catalog_page, get_lua_appids
 from ..services.anime_catalog import (
@@ -156,3 +158,29 @@ def recommendations(
     current_user: User = Depends(get_current_user),
 ):
     return recommend_games(db, current_user.id, limit=10)
+
+
+@router.get("/recommendations/v2", response_model=SteamCatalogOut)
+def recommendations_v2(
+    limit: int = Query(12, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if not AI_FEATURE_RECO_V2:
+        appids = get_lua_appids()
+        page_ids = appids[offset : offset + limit]
+        items = get_catalog_page(page_ids)
+        return {
+            "total": len(appids),
+            "offset": offset,
+            "limit": limit,
+            "items": items,
+        }
+
+    return recommend_v2(
+        db,
+        user_id=current_user.id,
+        limit=limit,
+        offset=offset,
+    )

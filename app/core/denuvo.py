@@ -111,6 +111,28 @@ DENUVO_APP_IDS = [
     1785650,
     3764200,
     3937550,  # Yakuza Kiwami 3 & Dark Ties
+    624090,   # Football Manager 2018
+    782330,   # DOOM Eternal: The Ancient Gods
+    356190,   # Middle-earth: Shadow of War
+    517630,   # Just Cause 4
+    1222690,  # Dragon Age: Inquisition
+    1941540,  # Metaphor: ReFantazio
+    1259970,  # eFootball PES
+    3059520,  # F1 25
+    770240,   # PES 2019
+    592580,   # PES 2018
+    456610,   # PES 2017
+    1235140,  # Yakuza: Like a Dragon
+    2369390,  # Additional game
+    1225570,  # Additional game
+    2239550,  # Watch Dogs: Legion
+    447040,   # Watch Dogs 2
+    371660,   # Far Cry Primal
+    939960,   # Far Cry New Dawn
+    298110,   # Far Cry 4
+    220240,   # Far Cry 3
+    552520,   # Far Cry 5
+    594570,   # Total War: WARHAMMER II
 ]
 
 DENUVO_APP_ID_SET = {str(app_id) for app_id in DENUVO_APP_IDS}

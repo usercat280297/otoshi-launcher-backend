@@ -43,16 +43,18 @@ class CrackOptionDetail(BaseModel):
 def online_fix_catalog(
     offset: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=200),
+    q: str | None = Query(None, min_length=1),
 ):
-    return get_online_fix_catalog(offset=offset, limit=limit)
+    return get_online_fix_catalog(offset=offset, limit=limit, q=q)
 
 
 @router.get("/bypass", response_model=FixCatalogOut)
 def bypass_catalog(
     offset: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=200),
+    q: str | None = Query(None, min_length=1),
 ):
-    return get_bypass_catalog(offset=offset, limit=limit)
+    return get_bypass_catalog(offset=offset, limit=limit, q=q)
 
 
 @router.get("/bypass/categories")
@@ -66,9 +68,10 @@ def bypass_by_category(
     category_id: str,
     offset: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=200),
+    q: str | None = Query(None, min_length=1),
 ) -> dict[str, Any]:
-    """Get bypass games filtered by category (ea, ubisoft, rockstar, denuvo)."""
-    return get_bypass_by_category(category_id, offset=offset, limit=limit)
+    """Get bypass games filtered by category (ea, ubisoft, rockstar, denuvo, others)."""
+    return get_bypass_by_category(category_id, offset=offset, limit=limit, q=q)
 
 
 @router.get("/detail/{kind}/{app_id}", response_model=FixEntryDetailOut)
@@ -199,4 +202,3 @@ def get_crack_install_guide(app_id: str, fix_type: str = Query("online-fix")) ->
         ],
         notes="You can uninstall this fix anytime to restore original files.",
     )
-

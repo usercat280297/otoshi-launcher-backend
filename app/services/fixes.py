@@ -12,6 +12,231 @@ from .steam_catalog import get_catalog_page
 
 DATA_DIR = Path(__file__).resolve().parents[1] / "data"
 _PLACEHOLDER_STEAM_APP_RE = re.compile(r"^steam app\s+\d+$", re.IGNORECASE)
+_NON_ALNUM_RE = re.compile(r"[^a-z0-9]+", re.IGNORECASE)
+_ACRONYM_STOPWORDS = {"the", "of", "and", "for", "to", "a", "an"}
+_BYPASS_PRIORITY_CATEGORY_ORDER = ("denuvo", "others", "ea", "ubisoft", "rockstar")
+_ROMAN_DIGITS = {
+    "i": 1,
+    "v": 5,
+    "x": 10,
+    "l": 50,
+    "c": 100,
+    "d": 500,
+    "m": 1000,
+}
+
+
+def _normalize_search_text(value: Any) -> str:
+    lowered = str(value or "").strip().lower()
+    if not lowered:
+        return ""
+    return " ".join(_NON_ALNUM_RE.sub(" ", lowered).split())
+
+
+def _compact_search_text(value: Any) -> str:
+    return "".join(ch for ch in str(value or "").lower() if ch.isalnum())
+
+
+def _roman_to_int(token: str) -> int | None:
+    raw = str(token or "").strip().lower()
+    if not raw or not re.fullmatch(r"[ivxlcdm]{1,6}", raw):
+        return None
+    total = 0
+    prev = 0
+    for char in reversed(raw):
+        value = _ROMAN_DIGITS.get(char)
+        if value is None:
+            return None
+        if value < prev:
+            total -= value
+        else:
+            total += value
+            prev = value
+    if total <= 0 or total > 3999:
+        return None
+    return total
+
+
+def _build_acronym_variants(value: Any) -> set[str]:
+    normalized = _normalize_search_text(value)
+    if not normalized:
+        return set()
+
+    tokens = [token for token in normalized.split(" ") if token]
+    if not tokens:
+        return set()
+
+    alpha_tokens = [token for token in tokens if any(ch.isalpha() for ch in token)]
+    filtered_alpha = [token for token in alpha_tokens if token not in _ACRONYM_STOPWORDS]
+    acronym_tokens = filtered_alpha or alpha_tokens
+    initials = "".join(token[0] for token in acronym_tokens if token)
+
+    variants: set[str] = set()
+    if len(initials) >= 2:
+        variants.add(initials)
+
+    numeric_tokens = [token for token in tokens if token.isdigit()]
+    roman_numbers = [str(value) for token in tokens if (value := _roman_to_int(token)) is not None]
+    for suffix in (numeric_tokens + roman_numbers):
+        if initials and suffix:
+            variants.add(f"{initials}{suffix}")
+
+    compact = _compact_search_text(normalized)
+    if compact:
+        variants.add(compact)
+
+    return variants
+
+
+def _normalize_category_id(category_id: Any) -> str:
+    normalized = str(category_id or "").strip().lower()
+    if normalized in {"other", "others"}:
+        return "others"
+    return normalized
+
+
+def _sort_categories_by_priority(categories: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    rank_map = {category_id: rank for rank, category_id in enumerate(_BYPASS_PRIORITY_CATEGORY_ORDER)}
+    ranked: list[tuple[int, int, dict[str, Any]]] = []
+    fallback_rank = len(rank_map) + 100
+    for index, category in enumerate(categories):
+        category_id = _normalize_category_id(category.get("id"))
+        rank = rank_map.get(category_id, fallback_rank + index)
+        ranked.append((rank, index, category))
+    ranked.sort(key=lambda row: (row[0], row[1]))
+    return [category for _, _, category in ranked]
+
+
+def _build_bypass_priority_appids(cat_data: dict[str, Any]) -> list[str]:
+    categories = cat_data.get("categories")
+    if not isinstance(categories, list):
+        return []
+
+    appids_by_category: dict[str, list[str]] = {}
+    for category in categories:
+        if not isinstance(category, dict):
+            continue
+        category_id = _normalize_category_id(category.get("id"))
+        raw_games = category.get("games")
+        if not isinstance(raw_games, list):
+            continue
+        bucket = appids_by_category.setdefault(category_id, [])
+        for raw_app_id in raw_games:
+            app_id = str(raw_app_id or "").strip()
+            if app_id and app_id.isdigit():
+                bucket.append(app_id)
+
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for category_id in _BYPASS_PRIORITY_CATEGORY_ORDER:
+        for app_id in appids_by_category.get(category_id, []):
+            if app_id in seen:
+                continue
+            seen.add(app_id)
+            ordered.append(app_id)
+    return ordered
+
+
+def _prioritize_entries(entries: list[dict[str, Any]], priority_appids: list[str]) -> list[dict[str, Any]]:
+    if not entries or not priority_appids:
+        return entries
+    rank_map = {app_id: rank for rank, app_id in enumerate(priority_appids)}
+    prioritized: list[tuple[int, int, dict[str, Any]]] = []
+    others: list[tuple[int, dict[str, Any]]] = []
+    for index, entry in enumerate(entries):
+        app_id = str(entry.get("app_id") or "").strip()
+        rank = rank_map.get(app_id)
+        if rank is None:
+            others.append((index, entry))
+        else:
+            prioritized.append((rank, index, entry))
+    prioritized.sort(key=lambda row: (row[0], row[1]))
+    return [entry for _, _, entry in prioritized] + [entry for _, entry in others]
+
+
+def _entry_search_candidates(entry: dict[str, Any]) -> list[str]:
+    options = entry.get("options") if isinstance(entry.get("options"), list) else []
+    option_names = []
+    for option in options:
+        if isinstance(option, dict):
+            name = str(option.get("name") or "").strip()
+            if name:
+                option_names.append(name)
+
+    steam_name = ""
+    steam = entry.get("steam")
+    if isinstance(steam, dict):
+        steam_name = str(steam.get("name") or "").strip()
+
+    return [
+        str(entry.get("name") or "").strip(),
+        steam_name,
+        *option_names,
+    ]
+
+
+def _entry_search_score(entry: dict[str, Any], query: str) -> float:
+    query_norm = _normalize_search_text(query)
+    query_compact = _compact_search_text(query)
+    if not query_compact:
+        return 0.0
+
+    score = 0.0
+    app_id = str(entry.get("app_id") or "").strip()
+
+    if app_id:
+        if query_compact == app_id:
+            return 1000.0
+        if query_compact.isdigit() and app_id.startswith(query_compact):
+            score = max(score, 920.0)
+
+    for text in _entry_search_candidates(entry):
+        if not text:
+            continue
+        normalized = _normalize_search_text(text)
+        compact = _compact_search_text(text)
+
+        if query_norm and normalized:
+            if normalized == query_norm:
+                score = max(score, 860.0)
+            elif normalized.startswith(f"{query_norm} "):
+                score = max(score, 830.0)
+            elif query_norm in normalized:
+                score = max(score, 780.0)
+
+        if query_compact and compact:
+            if compact == query_compact:
+                score = max(score, 845.0)
+            elif compact.startswith(query_compact):
+                score = max(score, 810.0)
+            elif query_compact in compact:
+                score = max(score, 760.0)
+
+        acronyms = _build_acronym_variants(text)
+        if query_compact in acronyms:
+            score = max(score, 840.0)
+        elif len(query_compact) >= 2 and any(
+            acronym.startswith(query_compact) for acronym in acronyms if acronym
+        ):
+            score = max(score, 800.0)
+
+    return score
+
+
+def _filter_entries_by_query(entries: list[dict[str, Any]], query: str | None) -> list[dict[str, Any]]:
+    normalized_query = str(query or "").strip()
+    if not normalized_query:
+        return entries
+
+    scored: list[tuple[float, int, dict[str, Any]]] = []
+    for index, entry in enumerate(entries):
+        score = _entry_search_score(entry, normalized_query)
+        if score <= 0:
+            continue
+        scored.append((score, index, entry))
+
+    scored.sort(key=lambda item: (-item[0], item[1]))
+    return [entry for _, _, entry in scored]
 
 
 def _load_json(name: str) -> dict[str, Any]:
@@ -308,8 +533,9 @@ def _find_bypass_game(app_id: str) -> tuple[dict[str, Any] | None, dict[str, Any
             if not isinstance(cat, dict):
                 continue
             if app_id in (cat.get("games") or []):
+                normalized_cat_id = _normalize_category_id(cat.get("id", ""))
                 category_meta = {
-                    "id": cat.get("id", ""),
+                    "id": normalized_cat_id,
                     "name": cat.get("name", ""),
                     "description": cat.get("description", ""),
                     "icon": cat.get("icon", ""),
@@ -319,28 +545,38 @@ def _find_bypass_game(app_id: str) -> tuple[dict[str, Any] | None, dict[str, Any
     return game_info if isinstance(game_info, dict) else None, category_meta
 
 
-def get_online_fix_catalog(offset: int = 0, limit: int = 100) -> dict[str, Any]:
-    cache_key = f"fixes:online:v2:{offset}:{limit}"
+def get_online_fix_catalog(offset: int = 0, limit: int = 100, q: str | None = None) -> dict[str, Any]:
+    query_key = _compact_search_text(q) or "-"
+    cache_key = f"fixes:online:v4:{query_key}:{offset}:{limit}"
     cached = cache_client.get_json(cache_key)
     if cached:
         return cached
     data = _load_json("online_fix.json")
+    cat_data = _load_json("bypass_categories.json")
+    priority_appids = _build_bypass_priority_appids(cat_data)
     appids = sorted(data.keys(), key=lambda value: int(value))
     entries = _build_entries(appids, data)
+    entries = _prioritize_entries(entries, priority_appids)
+    entries = _filter_entries_by_query(entries, q)
     total, items = _paginate(entries, offset, limit)
     payload = {"total": total, "offset": offset, "limit": limit, "items": items}
     cache_client.set_json(cache_key, payload, ttl=STEAM_CATALOG_CACHE_TTL_SECONDS)
     return payload
 
 
-def get_bypass_catalog(offset: int = 0, limit: int = 100) -> dict[str, Any]:
-    cache_key = f"fixes:bypass:v2:{offset}:{limit}"
+def get_bypass_catalog(offset: int = 0, limit: int = 100, q: str | None = None) -> dict[str, Any]:
+    query_key = _compact_search_text(q) or "-"
+    cache_key = f"fixes:bypass:v4:{query_key}:{offset}:{limit}"
     cached = cache_client.get_json(cache_key)
     if cached:
         return cached
     data = _load_json("bypass.json")
+    cat_data = _load_json("bypass_categories.json")
+    priority_appids = _build_bypass_priority_appids(cat_data)
     appids = sorted(data.keys(), key=lambda value: int(value))
     entries = _build_entries(appids, data)
+    entries = _prioritize_entries(entries, priority_appids)
+    entries = _filter_entries_by_query(entries, q)
     total, items = _paginate(entries, offset, limit)
     payload = {"total": total, "offset": offset, "limit": limit, "items": items}
     cache_client.set_json(cache_key, payload, ttl=STEAM_CATALOG_CACHE_TTL_SECONDS)
@@ -365,7 +601,7 @@ def get_bypass_option(app_id: str) -> dict[str, Any] | None:
 
 def get_bypass_categories() -> list[dict[str, Any]]:
     """Get all bypass categories with their games."""
-    cache_key = "fixes:bypass:categories:v2"
+    cache_key = "fixes:bypass:categories:v4"
     cached = cache_client.get_json(cache_key)
     if cached:
         return cached
@@ -376,10 +612,13 @@ def get_bypass_categories() -> list[dict[str, Any]]:
 
     categories = cat_data.get("categories", [])
     games_data = cat_data.get("games", {})
+    sorted_categories = _sort_categories_by_priority(
+        [cat for cat in categories if isinstance(cat, dict)]
+    )
 
     result = []
-    for cat in categories:
-        cat_id = cat.get("id", "")
+    for cat in sorted_categories:
+        cat_id = _normalize_category_id(cat.get("id", ""))
         cat_games = cat.get("games", [])
 
         summaries = get_catalog_page(cat_games)
@@ -424,9 +663,16 @@ def get_bypass_categories() -> list[dict[str, Any]]:
     return result
 
 
-def get_bypass_by_category(category_id: str, offset: int = 0, limit: int = 100) -> dict[str, Any]:
+def get_bypass_by_category(
+    category_id: str,
+    offset: int = 0,
+    limit: int = 100,
+    q: str | None = None,
+) -> dict[str, Any]:
     """Get bypass games filtered by category."""
-    cache_key = f"fixes:bypass:cat:v2:{category_id}:{offset}:{limit}"
+    normalized_category_id = _normalize_category_id(category_id)
+    query_key = _compact_search_text(q) or "-"
+    cache_key = f"fixes:bypass:cat:v3:{normalized_category_id}:{query_key}:{offset}:{limit}"
     cached = cache_client.get_json(cache_key)
     if cached:
         return cached
@@ -440,7 +686,7 @@ def get_bypass_by_category(category_id: str, offset: int = 0, limit: int = 100) 
 
     target_cat = None
     for cat in categories:
-        if cat.get("id") == category_id:
+        if _normalize_category_id(cat.get("id")) == normalized_category_id:
             target_cat = cat
             break
 
@@ -474,6 +720,7 @@ def get_bypass_by_category(category_id: str, offset: int = 0, limit: int = 100) 
             }
         )
 
+    items = _filter_entries_by_query(items, q)
     total, paginated = _paginate(items, offset, limit)
     payload = {
         "total": total,
@@ -481,7 +728,7 @@ def get_bypass_by_category(category_id: str, offset: int = 0, limit: int = 100) 
         "limit": limit,
         "items": paginated,
         "category": {
-            "id": target_cat.get("id", ""),
+            "id": normalized_category_id,
             "name": target_cat.get("name", ""),
             "description": target_cat.get("description", ""),
             "icon": target_cat.get("icon", ""),

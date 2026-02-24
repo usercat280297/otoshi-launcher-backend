@@ -103,6 +103,15 @@ _LUA_PACK_INDEX_SIGNATURE: Optional[str] = None
 _LUA_PACK_INDEX: Optional[Dict[str, List[str]]] = None
 _LUA_PACK_CLEANED_LEGACY = False
 _CHUNK_MANIFEST_MAP_FILE = Path(__file__).resolve().parents[1] / "data" / "chunk_manifest_map.json"
+_BYPASS_CATEGORIES_FILE = Path(__file__).resolve().parents[1] / "data" / "bypass_categories.json"
+_ONLINE_FIX_FILE = Path(__file__).resolve().parents[1] / "data" / "online_fix.json"
+_BYPASS_PRIORITY_CATEGORY_ORDER = ("others", "ea", "ubisoft", "rockstar")
+_BYPASS_PRIORITY_CACHE_LOCK = threading.Lock()
+_BYPASS_PRIORITY_CACHE_MTIME: Optional[float] = None
+_BYPASS_PRIORITY_APPIDS: List[str] = []
+_ONLINE_FIX_PRIORITY_CACHE_LOCK = threading.Lock()
+_ONLINE_FIX_PRIORITY_CACHE_MTIME: Optional[float] = None
+_ONLINE_FIX_PRIORITY_APPIDS: List[str] = []
 _MANIFEST_NAME_MAP_LOCK = threading.Lock()
 _MANIFEST_NAME_MAP_SIGNATURE: Optional[str] = None
 _MANIFEST_NAME_MAP: Dict[str, str] = {}
@@ -156,17 +165,118 @@ def get_hot_appids() -> List[str]:
     return appids
 
 
+def _normalize_bypass_category_id(category_id: Any) -> str:
+    normalized = str(category_id or "").strip().lower()
+    if normalized in {"other", "others"}:
+        return "others"
+    return normalized
+
+
+def _get_bypass_priority_appids() -> List[str]:
+    global _BYPASS_PRIORITY_CACHE_MTIME
+    global _BYPASS_PRIORITY_APPIDS
+
+    try:
+        mtime = _BYPASS_CATEGORIES_FILE.stat().st_mtime
+    except OSError:
+        return []
+
+    with _BYPASS_PRIORITY_CACHE_LOCK:
+        if _BYPASS_PRIORITY_CACHE_MTIME == mtime:
+            return list(_BYPASS_PRIORITY_APPIDS)
+
+        appids_by_category: Dict[str, List[str]] = {}
+        try:
+            payload = json.loads(_BYPASS_CATEGORIES_FILE.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            _BYPASS_PRIORITY_CACHE_MTIME = mtime
+            _BYPASS_PRIORITY_APPIDS = []
+            return []
+
+        categories = payload.get("categories")
+        if isinstance(categories, list):
+            for category in categories:
+                if not isinstance(category, dict):
+                    continue
+                category_id = _normalize_bypass_category_id(category.get("id"))
+                raw_games = category.get("games")
+                if not isinstance(raw_games, list):
+                    continue
+                bucket = appids_by_category.setdefault(category_id, [])
+                for raw_app_id in raw_games:
+                    app_id = str(raw_app_id or "").strip()
+                    if app_id and app_id.isdigit():
+                        bucket.append(app_id)
+
+        ordered: List[str] = []
+        seen: set[str] = set()
+        for category_id in _BYPASS_PRIORITY_CATEGORY_ORDER:
+            for app_id in appids_by_category.get(category_id, []):
+                if app_id in seen:
+                    continue
+                seen.add(app_id)
+                ordered.append(app_id)
+
+        _BYPASS_PRIORITY_CACHE_MTIME = mtime
+        _BYPASS_PRIORITY_APPIDS = ordered
+        return list(ordered)
+
+
+def _get_online_fix_priority_appids() -> List[str]:
+    global _ONLINE_FIX_PRIORITY_CACHE_MTIME
+    global _ONLINE_FIX_PRIORITY_APPIDS
+
+    try:
+        mtime = _ONLINE_FIX_FILE.stat().st_mtime
+    except OSError:
+        return []
+
+    with _ONLINE_FIX_PRIORITY_CACHE_LOCK:
+        if _ONLINE_FIX_PRIORITY_CACHE_MTIME == mtime:
+            return list(_ONLINE_FIX_PRIORITY_APPIDS)
+
+        try:
+            payload = json.loads(_ONLINE_FIX_FILE.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            _ONLINE_FIX_PRIORITY_CACHE_MTIME = mtime
+            _ONLINE_FIX_PRIORITY_APPIDS = []
+            return []
+
+        ordered = []
+        if isinstance(payload, dict):
+            ordered = sorted(
+                (str(app_id).strip() for app_id in payload.keys() if str(app_id).strip().isdigit()),
+                key=lambda value: int(value),
+            )
+
+        _ONLINE_FIX_PRIORITY_CACHE_MTIME = mtime
+        _ONLINE_FIX_PRIORITY_APPIDS = ordered
+        return list(ordered)
+
+
+def _build_priority_appids() -> List[str]:
+    ordered: List[str] = []
+    seen: set[str] = set()
+    for source in (
+        DENUVO_APP_IDS,
+        _get_bypass_priority_appids(),
+        _get_online_fix_priority_appids(),
+        get_hot_appids(),
+    ):
+        for app_id in source:
+            app_str = str(app_id).strip()
+            if not app_str or app_str in seen:
+                continue
+            seen.add(app_str)
+            ordered.append(app_str)
+    return ordered
+
+
 def prioritize_appids(appids: List[str]) -> List[str]:
     seen: set[str] = set()
     prioritized: list[str] = []
     appid_set = set(appids)
-    hot_ids = get_hot_appids()
-    for app_id in DENUVO_APP_IDS:
-        app_str = str(app_id)
-        if app_str in appid_set and app_str not in seen:
-            prioritized.append(app_str)
-            seen.add(app_str)
-    for app_id in hot_ids:
+    for app_id in _build_priority_appids():
         if app_id in appid_set and app_id not in seen:
             prioritized.append(app_id)
             seen.add(app_id)
@@ -178,19 +288,24 @@ def prioritize_appids(appids: List[str]) -> List[str]:
 
 
 def prioritize_items(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    denuvo_items = []
-    hot_items = []
-    other_items = []
-    hot_set = set(get_hot_appids())
-    for item in items:
+    priority_rank = {
+        app_id: rank for rank, app_id in enumerate(_build_priority_appids())
+    }
+    priority_items: list[tuple[int, int, Dict[str, Any]]] = []
+    other_items: list[tuple[int, Dict[str, Any]]] = []
+
+    for index, item in enumerate(items):
         app_id = str(item.get("app_id") or "")
-        if app_id in DENUVO_APP_ID_SET:
-            denuvo_items.append(item)
-        elif app_id in hot_set:
-            hot_items.append(item)
+        rank = priority_rank.get(app_id)
+        if rank is None:
+            other_items.append((index, item))
         else:
-            other_items.append(item)
-    return denuvo_items + hot_items + other_items
+            priority_items.append((rank, index, item))
+
+    priority_items.sort(key=lambda row: (row[0], row[1]))
+    ordered_priority = [item for _, _, item in priority_items]
+    ordered_other = [item for _, item in other_items]
+    return ordered_priority + ordered_other
 
 
 def _strip_html(value: Optional[str]) -> Optional[str]:

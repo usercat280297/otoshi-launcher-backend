@@ -210,6 +210,9 @@ class SteamCatalogItemOut(BaseModel):
     classification_confidence: Optional[float] = None
     artwork_coverage: Optional[str] = None
     denuvo: Optional[bool] = None
+    reason_codes: Optional[List[str]] = None
+    score_breakdown: Optional[dict] = None
+    search_score: Optional[float] = None
 
 
 class SteamGameDetailOut(SteamCatalogItemOut):
@@ -674,6 +677,141 @@ class TelemetryEventOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class AISearchEventIn(BaseModel):
+    query: str = Field(min_length=1, max_length=300)
+    action: str = Field(default="submit", min_length=1, max_length=40)
+    app_id: Optional[str] = None
+    dwell_ms: int = Field(default=0, ge=0)
+    payload: dict = Field(default_factory=dict)
+
+
+class AISearchEventOut(BaseModel):
+    stored: int = 0
+    skipped: int = 0
+    consent_required: bool = False
+
+
+class RecommendationImpressionIn(BaseModel):
+    game_id: Optional[str] = None
+    app_id: Optional[str] = None
+    recommendation_id: Optional[str] = None
+    rank_position: int = Field(default=0, ge=0)
+    algorithm_version: str = Field(default="v2", max_length=40)
+    context: str = Field(default="discovery", max_length=80)
+    payload: dict = Field(default_factory=dict)
+
+
+class RecommendationFeedbackIn(BaseModel):
+    impression_id: Optional[str] = None
+    game_id: Optional[str] = None
+    app_id: Optional[str] = None
+    feedback_type: str = Field(min_length=1, max_length=40)
+    value: float = 1.0
+    payload: dict = Field(default_factory=dict)
+
+
+class RecommendationTrackingOut(BaseModel):
+    id: str
+    created_at: datetime
+
+
+class SupportSuggestIn(BaseModel):
+    session_id: Optional[str] = None
+    topic: Optional[str] = None
+    message: str = Field(min_length=1)
+    context: dict = Field(default_factory=dict)
+    preferred_provider: Optional[str] = None
+    preferred_model: Optional[str] = None
+
+
+class SupportSuggestOut(BaseModel):
+    session_id: str
+    suggestion_id: str
+    provider: str
+    model: str
+    cached: bool = False
+    confidence: float = 0.0
+    suggestion: str
+    reason_codes: List[str] = Field(default_factory=list)
+
+
+class AntiCheatSignalIn(BaseModel):
+    device_id: str = Field(min_length=1, max_length=120)
+    signal_type: str = Field(min_length=1, max_length=80)
+    severity: int = Field(default=1, ge=1, le=10)
+    observed_at: Optional[datetime] = None
+    payload: dict = Field(default_factory=dict)
+
+
+class AntiCheatSignalOut(BaseModel):
+    signal_id: str
+    case_id: str
+    risk_score: float
+    risk_level: str
+    recommended_action: str
+    reason_codes: List[str] = Field(default_factory=list)
+
+
+class AntiCheatCaseOut(BaseModel):
+    id: str
+    user_id: Optional[str] = None
+    device_id: str
+    status: str
+    risk_score: float
+    risk_level: str
+    reason_codes: List[str] = Field(default_factory=list)
+    recommended_action: str
+    latest_signal_at: Optional[datetime] = None
+    payload: dict = Field(default_factory=dict)
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class PrivacyConsentIn(BaseModel):
+    category: Optional[str] = None
+    categories: List[str] = Field(default_factory=list)
+    granted: bool
+    source: str = Field(default="settings", max_length=40)
+    payload: dict = Field(default_factory=dict)
+
+
+class PrivacyConsentOut(BaseModel):
+    category: str
+    granted: bool
+    source: str
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class PrivacyExportOut(BaseModel):
+    user_id: str
+    consents: List[PrivacyConsentOut] = Field(default_factory=list)
+    telemetry_events: List[TelemetryEventOut] = Field(default_factory=list)
+    behavior_events: List[dict] = Field(default_factory=list)
+    search_interactions: List[dict] = Field(default_factory=list)
+    recommendation_impressions: List[dict] = Field(default_factory=list)
+    recommendation_feedback: List[dict] = Field(default_factory=list)
+    anti_cheat_signals: List[dict] = Field(default_factory=list)
+    anti_cheat_cases: List[dict] = Field(default_factory=list)
+    support_sessions: List[dict] = Field(default_factory=list)
+    support_suggestions: List[dict] = Field(default_factory=list)
+
+
+class PrivacyDeleteIn(BaseModel):
+    scope: List[str] = Field(default_factory=list)
+
+
+class PrivacyDeleteOut(BaseModel):
+    request_id: str
+    status: str
+    deleted_counts: dict = Field(default_factory=dict)
 
 
 class PaymentOut(BaseModel):

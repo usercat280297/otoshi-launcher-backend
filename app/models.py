@@ -88,6 +88,28 @@ class User(Base):
         cascade="all, delete",
     )
     play_sessions = relationship("GamePlaySession", back_populates="user", cascade="all, delete")
+    behavior_events = relationship("UserBehaviorEvent", back_populates="user", cascade="all, delete")
+    search_interactions = relationship("SearchInteraction", back_populates="user", cascade="all, delete")
+    recommendation_impressions = relationship(
+        "RecommendationImpression",
+        back_populates="user",
+        cascade="all, delete",
+    )
+    recommendation_feedback = relationship(
+        "RecommendationFeedback",
+        back_populates="user",
+        cascade="all, delete",
+    )
+    anti_cheat_signals = relationship("AntiCheatSignal", back_populates="user", cascade="all, delete")
+    anti_cheat_cases = relationship("AntiCheatCase", back_populates="user", cascade="all, delete")
+    support_sessions = relationship("SupportSession", back_populates="user", cascade="all, delete")
+    support_suggestions = relationship("SupportSuggestion", back_populates="user", cascade="all, delete")
+    privacy_consents = relationship("PrivacyConsent", back_populates="user", cascade="all, delete")
+    privacy_deletion_requests = relationship(
+        "PrivacyDeletionRequest",
+        back_populates="user",
+        cascade="all, delete",
+    )
 
 
 class OAuthIdentity(Base):
@@ -156,6 +178,17 @@ class Game(Base):
     remote_downloads = relationship("RemoteDownload", back_populates="game", cascade="all, delete")
     preorders = relationship("Preorder", back_populates="game", cascade="all, delete")
     play_sessions = relationship("GamePlaySession", back_populates="game", cascade="all, delete")
+    recommendation_impressions = relationship(
+        "RecommendationImpression",
+        back_populates="game",
+        cascade="all, delete",
+    )
+    recommendation_feedback = relationship(
+        "RecommendationFeedback",
+        back_populates="game",
+        cascade="all, delete",
+    )
+    embeddings = relationship("GameEmbedding", back_populates="game", cascade="all, delete")
     graphics_config = relationship(
         "GameGraphicsConfig",
         back_populates="game",
@@ -474,6 +507,209 @@ class TelemetryEvent(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     user = relationship("User", back_populates="telemetry_events")
+
+
+class UserBehaviorEvent(Base):
+    __tablename__ = "user_behavior_events"
+
+    id = Column(String(36), primary_key=True, default=generate_id)
+    user_id = Column(String(36), ForeignKey("users.id"), nullable=True, index=True)
+    event_type = Column(String(80), nullable=False, index=True)
+    source = Column(String(40), nullable=False, default="launcher")
+    payload = Column(JSON, default=dict)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+    user = relationship("User", back_populates="behavior_events")
+
+
+class SearchInteraction(Base):
+    __tablename__ = "search_interactions"
+
+    id = Column(String(36), primary_key=True, default=generate_id)
+    user_id = Column(String(36), ForeignKey("users.id"), nullable=True, index=True)
+    query = Column(String(300), nullable=False, index=True)
+    action = Column(String(40), nullable=False, default="submit", index=True)
+    app_id = Column(String(20), nullable=True, index=True)
+    dwell_ms = Column(Integer, default=0)
+    payload = Column(JSON, default=dict)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+    user = relationship("User", back_populates="search_interactions")
+
+
+class RecommendationImpression(Base):
+    __tablename__ = "recommendation_impressions"
+
+    id = Column(String(36), primary_key=True, default=generate_id)
+    user_id = Column(String(36), ForeignKey("users.id"), nullable=True, index=True)
+    game_id = Column(String(36), ForeignKey("games.id"), nullable=True, index=True)
+    app_id = Column(String(20), nullable=True, index=True)
+    recommendation_id = Column(String(64), nullable=True, index=True)
+    rank_position = Column(Integer, default=0)
+    algorithm_version = Column(String(40), default="v2")
+    context = Column(String(80), default="discovery")
+    payload = Column(JSON, default=dict)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+    user = relationship("User", back_populates="recommendation_impressions")
+    game = relationship("Game", back_populates="recommendation_impressions")
+    feedback = relationship("RecommendationFeedback", back_populates="impression", cascade="all, delete")
+
+
+class RecommendationFeedback(Base):
+    __tablename__ = "recommendation_feedback"
+
+    id = Column(String(36), primary_key=True, default=generate_id)
+    user_id = Column(String(36), ForeignKey("users.id"), nullable=True, index=True)
+    impression_id = Column(String(36), ForeignKey("recommendation_impressions.id"), nullable=True, index=True)
+    game_id = Column(String(36), ForeignKey("games.id"), nullable=True, index=True)
+    app_id = Column(String(20), nullable=True, index=True)
+    feedback_type = Column(String(40), nullable=False, index=True)
+    value = Column(Float, default=1.0)
+    payload = Column(JSON, default=dict)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+    user = relationship("User", back_populates="recommendation_feedback")
+    impression = relationship("RecommendationImpression", back_populates="feedback")
+    game = relationship("Game", back_populates="recommendation_feedback")
+
+
+class GameEmbedding(Base):
+    __tablename__ = "game_embeddings"
+    __table_args__ = (
+        UniqueConstraint("app_id", "model", "source", name="uq_game_embedding_app_model_source"),
+    )
+
+    id = Column(String(36), primary_key=True, default=generate_id)
+    game_id = Column(String(36), ForeignKey("games.id"), nullable=True, index=True)
+    app_id = Column(String(20), nullable=False, index=True)
+    model = Column(String(80), nullable=False, default="hash-128")
+    source = Column(String(40), nullable=False, default="steam")
+    vector = Column(JSON, default=list)
+    dimension = Column(Integer, default=128)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    game = relationship("Game", back_populates="embeddings")
+
+
+class QueryEmbeddingCache(Base):
+    __tablename__ = "query_embedding_cache"
+
+    id = Column(String(36), primary_key=True, default=generate_id)
+    query_hash = Column(String(64), unique=True, nullable=False, index=True)
+    query_text = Column(String(300), nullable=False)
+    model = Column(String(80), nullable=False, default="hash-128")
+    vector = Column(JSON, default=list)
+    dimension = Column(Integer, default=128)
+    last_used_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class AntiCheatSignal(Base):
+    __tablename__ = "anti_cheat_signals"
+
+    id = Column(String(36), primary_key=True, default=generate_id)
+    user_id = Column(String(36), ForeignKey("users.id"), nullable=True, index=True)
+    device_id = Column(String(120), nullable=False, index=True)
+    signal_type = Column(String(80), nullable=False, index=True)
+    severity = Column(Integer, default=1, index=True)
+    payload = Column(JSON, default=dict)
+    observed_at = Column(DateTime, default=datetime.utcnow, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+    user = relationship("User", back_populates="anti_cheat_signals")
+
+
+class AntiCheatCase(Base):
+    __tablename__ = "anti_cheat_cases"
+
+    id = Column(String(36), primary_key=True, default=generate_id)
+    user_id = Column(String(36), ForeignKey("users.id"), nullable=True, index=True)
+    device_id = Column(String(120), nullable=False, index=True)
+    status = Column(String(40), default="open", index=True)
+    risk_score = Column(Float, default=0.0, index=True)
+    risk_level = Column(String(20), default="low")
+    reason_codes = Column(JSON, default=list)
+    recommended_action = Column(String(80), default="monitor")
+    latest_signal_at = Column(DateTime, default=datetime.utcnow, index=True)
+    payload = Column(JSON, default=dict)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    user = relationship("User", back_populates="anti_cheat_cases")
+
+
+class SupportSession(Base):
+    __tablename__ = "support_sessions"
+
+    id = Column(String(36), primary_key=True, default=generate_id)
+    user_id = Column(String(36), ForeignKey("users.id"), nullable=True, index=True)
+    channel = Column(String(40), default="launcher")
+    topic = Column(String(120), nullable=True)
+    status = Column(String(30), default="open", index=True)
+    context_payload = Column(JSON, default=dict)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    user = relationship("User", back_populates="support_sessions")
+    suggestions = relationship("SupportSuggestion", back_populates="session", cascade="all, delete")
+
+
+class SupportSuggestion(Base):
+    __tablename__ = "support_suggestions"
+
+    id = Column(String(36), primary_key=True, default=generate_id)
+    session_id = Column(String(36), ForeignKey("support_sessions.id"), nullable=False, index=True)
+    user_id = Column(String(36), ForeignKey("users.id"), nullable=True, index=True)
+    provider = Column(String(40), nullable=False, default="none")
+    model = Column(String(80), nullable=False, default="none")
+    prompt_hash = Column(String(64), nullable=False, index=True)
+    input_text = Column(Text, nullable=False)
+    suggestion_text = Column(Text, nullable=False)
+    confidence = Column(Float, default=0.0)
+    cached = Column(Boolean, default=False)
+    accepted = Column(Boolean, nullable=True)
+    payload = Column(JSON, default=dict)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+    session = relationship("SupportSession", back_populates="suggestions")
+    user = relationship("User", back_populates="support_suggestions")
+
+
+class PrivacyConsent(Base):
+    __tablename__ = "privacy_consents"
+    __table_args__ = (
+        UniqueConstraint("user_id", "category", name="uq_privacy_consent_user_category"),
+    )
+
+    id = Column(String(36), primary_key=True, default=generate_id)
+    user_id = Column(String(36), ForeignKey("users.id"), nullable=False, index=True)
+    category = Column(String(50), nullable=False, index=True)
+    granted = Column(Boolean, default=False, index=True)
+    source = Column(String(40), default="settings")
+    payload = Column(JSON, default=dict)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    user = relationship("User", back_populates="privacy_consents")
+
+
+class PrivacyDeletionRequest(Base):
+    __tablename__ = "privacy_deletion_requests"
+
+    id = Column(String(36), primary_key=True, default=generate_id)
+    user_id = Column(String(36), ForeignKey("users.id"), nullable=False, index=True)
+    scope = Column(JSON, default=list)
+    status = Column(String(30), default="pending", index=True)
+    result_payload = Column(JSON, default=dict)
+    requested_at = Column(DateTime, default=datetime.utcnow, index=True)
+    processed_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    user = relationship("User", back_populates="privacy_deletion_requests")
 
 
 class License(Base):

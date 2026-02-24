@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 from typing import Optional
 
@@ -14,14 +15,90 @@ MIN_SCORE = 25.0
 LOCAL_FALLBACK_BATCH_SIZE = 48
 LOCAL_FALLBACK_MAX_SCAN = 1200
 LOCAL_FALLBACK_TARGET_MATCHES = 40
+SEARCH_VARIANT_LIMIT = max(1, int(os.getenv("STEAM_SEARCH_VARIANT_LIMIT", "1")))
+STEAM_SEARCH_ENABLE_LOCAL_FALLBACK = os.getenv(
+    "STEAM_SEARCH_ENABLE_LOCAL_FALLBACK",
+    "false",
+).lower() in (
+    "1",
+    "true",
+    "yes",
+    "on",
+)
 
 _NON_ALNUM = re.compile(r"[^a-z0-9]+", re.IGNORECASE)
+_ACRONYM_STOPWORDS = {"the", "of", "and", "for", "to", "a", "an"}
+_ROMAN_DIGITS = {
+    "i": 1,
+    "v": 5,
+    "x": 10,
+    "l": 50,
+    "c": 100,
+    "d": 500,
+    "m": 1000,
+}
 
 
 def normalize_text(value: str) -> str:
     lowered = value.strip().lower()
     cleaned = _NON_ALNUM.sub(" ", lowered)
     return " ".join(cleaned.split())
+
+
+def compact_text(value: str) -> str:
+    return "".join(ch for ch in str(value or "").lower() if ch.isalnum())
+
+
+def _roman_to_int(token: str) -> Optional[int]:
+    raw = str(token or "").strip().lower()
+    if not raw or not re.fullmatch(r"[ivxlcdm]{1,6}", raw):
+        return None
+    total = 0
+    prev = 0
+    for char in reversed(raw):
+        value = _ROMAN_DIGITS.get(char)
+        if value is None:
+            return None
+        if value < prev:
+            total -= value
+        else:
+            total += value
+            prev = value
+    if total <= 0 or total > 3999:
+        return None
+    return total
+
+
+def build_acronym_variants(value: str) -> set[str]:
+    normalized = normalize_text(value)
+    if not normalized:
+        return set()
+
+    tokens = [token for token in normalized.split(" ") if token]
+    if not tokens:
+        return set()
+
+    alpha_tokens = [token for token in tokens if any(ch.isalpha() for ch in token)]
+    filtered_alpha = [token for token in alpha_tokens if token not in _ACRONYM_STOPWORDS]
+    acronym_tokens = filtered_alpha or alpha_tokens
+
+    initials = "".join(token[0] for token in acronym_tokens if token)
+    variants: set[str] = set()
+    if len(initials) >= 2:
+        variants.add(initials)
+
+    numeric_tokens = [token for token in tokens if token.isdigit()]
+    roman_numbers = [str(value) for token in tokens if (value := _roman_to_int(token)) is not None]
+
+    for suffix in (numeric_tokens + roman_numbers):
+        if initials and suffix:
+            variants.add(f"{initials}{suffix}")
+
+    compact = compact_text(normalized)
+    if compact:
+        variants.add(compact)
+
+    return variants
 
 
 def build_search_variants(query: str) -> list[str]:
@@ -77,6 +154,7 @@ def score_candidate(query: str, item: dict, hot_rank: dict[str, int]) -> float:
     if not name and not app_id:
         return 0.0
     query_norm = normalize_text(query)
+    query_compact = compact_text(query)
     name_norm = normalize_text(name)
     score = 0.0
 
@@ -91,12 +169,21 @@ def score_candidate(query: str, item: dict, hot_rank: dict[str, int]) -> float:
             score = max(score, _token_score(query_norm, name_norm))
         score = max(score, _native_score(query_norm, name_norm))
 
-    if query_norm.isdigit() and app_id:
-        if app_id == query_norm:
+    if query_compact and name:
+        acronym_variants = build_acronym_variants(name)
+        if query_compact in acronym_variants:
+            score = max(score, 93.0)
+        elif len(query_compact) >= 2 and any(
+            variant.startswith(query_compact) for variant in acronym_variants if variant
+        ):
+            score = max(score, 86.0)
+
+    if query_compact.isdigit() and app_id:
+        if app_id == query_compact:
             score = max(score, 100.0)
-        elif app_id.startswith(query_norm):
+        elif app_id.startswith(query_compact):
             score = max(score, 90.0)
-        elif query_norm in app_id:
+        elif query_compact in app_id:
             score = max(score, 75.0)
 
     if app_id in hot_rank:
@@ -169,7 +256,7 @@ def search_catalog(
     for appid in numeric_candidates:
         candidates[appid] = {"app_id": appid, "name": appid}
 
-    for variant in build_search_variants(trimmed):
+    for variant in build_search_variants(trimmed)[:SEARCH_VARIANT_LIMIT]:
         results = search_store(variant)
         for item in results:
             app_id = str(item.get("app_id") or "")
@@ -180,7 +267,7 @@ def search_catalog(
 
     # Fallback: if upstream store search has no candidates (geo/network blocked),
     # do a bounded local scan of known appids.
-    if not candidates:
+    if not candidates and STEAM_SEARCH_ENABLE_LOCAL_FALLBACK:
         for item in _local_fallback_candidates(trimmed, allowed_appids):
             app_id = str(item.get("app_id") or "")
             if app_id and app_id in allowed_set:

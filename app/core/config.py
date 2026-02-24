@@ -316,6 +316,17 @@ REDIS_URL = os.getenv("REDIS_URL", "")
 CACHE_TTL_SECONDS = int(os.getenv("CACHE_TTL_SECONDS", "120"))
 RATE_LIMIT_DEFAULT_PER_MINUTE = int(os.getenv("RATE_LIMIT_DEFAULT_PER_MINUTE", "120"))
 RATE_LIMIT_LOGIN_PER_MINUTE = int(os.getenv("RATE_LIMIT_LOGIN_PER_MINUTE", "8"))
+RATE_LIMIT_STEAM_CATALOG_PER_MINUTE = int(
+    os.getenv("RATE_LIMIT_STEAM_CATALOG_PER_MINUTE", "3000")
+)
+RATE_LIMIT_AI_WRITE_PER_MINUTE = int(
+    os.getenv("RATE_LIMIT_AI_WRITE_PER_MINUTE", "240")
+)
+RATE_LIMIT_PRIVACY_WRITE_PER_MINUTE = int(
+    os.getenv("RATE_LIMIT_PRIVACY_WRITE_PER_MINUTE", "90")
+)
+AI_WRITE_MAX_BODY_BYTES = int(os.getenv("AI_WRITE_MAX_BODY_BYTES", "131072"))
+AI_SEARCH_EVENTS_MAX_BATCH = int(os.getenv("AI_SEARCH_EVENTS_MAX_BATCH", "100"))
 
 LAUNCHER_CORE_PATH = os.getenv("LAUNCHER_CORE_PATH", "")
 MANIFEST_SOURCE_DIR = os.getenv("MANIFEST_SOURCE_DIR", "")
@@ -352,3 +363,65 @@ VNPAY_TMN_CODE = os.getenv("VNPAY_TMN_CODE", "")
 VNPAY_SECRET_KEY = os.getenv("VNPAY_SECRET_KEY", "")
 VNPAY_RETURN_URL = os.getenv("VNPAY_RETURN_URL", f"{_LOCAL_API_BASE}/payments/vnpay/return")
 VNPAY_API_URL = os.getenv("VNPAY_API_URL", "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html")
+
+# AI platform feature flags
+AI_FEATURE_SEARCH_HYBRID = os.getenv("AI_FEATURE_SEARCH_HYBRID", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+    "on",
+)
+AI_FEATURE_RECO_V2 = os.getenv("AI_FEATURE_RECO_V2", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+    "on",
+)
+AI_FEATURE_SUPPORT_COPILOT = os.getenv("AI_FEATURE_SUPPORT_COPILOT", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+    "on",
+)
+AI_FEATURE_ANTI_CHEAT_RISK = os.getenv("AI_FEATURE_ANTI_CHEAT_RISK", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+    "on",
+)
+AI_SEARCH_DEFAULT_MODE = os.getenv("AI_SEARCH_DEFAULT_MODE", "lexical").strip().lower() or "lexical"
+AI_SEARCH_VECTOR_DIM = int(os.getenv("AI_SEARCH_VECTOR_DIM", "128"))
+AI_SEARCH_MAX_CANDIDATES = int(os.getenv("AI_SEARCH_MAX_CANDIDATES", "320"))
+AI_PRIVACY_DEFAULT_DENY = os.getenv("AI_PRIVACY_DEFAULT_DENY", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+    "on",
+)
+
+# AI gateway/provider settings
+AI_GATEWAY_CACHE_TTL_SECONDS = int(os.getenv("AI_GATEWAY_CACHE_TTL_SECONDS", "900"))
+AI_GATEWAY_MAX_REQUESTS_PER_MINUTE = int(os.getenv("AI_GATEWAY_MAX_REQUESTS_PER_MINUTE", "120"))
+AI_BUDGET_MONTHLY_USD = float(os.getenv("AI_BUDGET_MONTHLY_USD", "0"))
+AI_PROVIDER_ORDER = [
+    item.strip().lower()
+    for item in os.getenv("AI_PROVIDER_ORDER", "gemini,github_models,ollama").split(",")
+    if item.strip()
+]
+
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+GEMINI_API_BASE_URL = os.getenv(
+    "GEMINI_API_BASE_URL",
+    "https://generativelanguage.googleapis.com/v1beta",
+)
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+
+GITHUB_MODELS_API_KEY = os.getenv("GITHUB_MODELS_API_KEY", os.getenv("GITHUB_TOKEN", ""))
+GITHUB_MODELS_BASE_URL = os.getenv(
+    "GITHUB_MODELS_BASE_URL",
+    "https://models.inference.ai.azure.com",
+)
+GITHUB_MODELS_MODEL = os.getenv("GITHUB_MODELS_MODEL", "gpt-4.1-mini")
+
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:7b")

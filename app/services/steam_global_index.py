@@ -10,7 +10,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 from pathlib import Path
 
 import requests
-from sqlalchemy import case, desc, func, or_, select
+from sqlalchemy import and_, case, desc, func, or_, select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 from threading import Lock
@@ -70,6 +70,15 @@ _STEAMDB_JSON_PATTERN = re.compile(
 _YEAR_PATTERN = re.compile(r"(19|20)\d{2}")
 _EPIC_CACHE_LOCK = Lock()
 _EPIC_CANDIDATE_CACHE: Dict[str, Any] = {"loaded_at": 0.0, "items": []}
+_BYPASS_CATEGORIES_FILE = Path(__file__).resolve().parents[1] / "data" / "bypass_categories.json"
+_ONLINE_FIX_FILE = Path(__file__).resolve().parents[1] / "data" / "online_fix.json"
+_BYPASS_PRIORITY_CATEGORY_ORDER = ("others", "ea", "ubisoft", "rockstar")
+_BYPASS_PRIORITY_LOCK = Lock()
+_BYPASS_PRIORITY_CACHE_MTIME: Optional[float] = None
+_BYPASS_PRIORITY_APPIDS: List[str] = []
+_ONLINE_FIX_PRIORITY_LOCK = Lock()
+_ONLINE_FIX_PRIORITY_CACHE_MTIME: Optional[float] = None
+_ONLINE_FIX_PRIORITY_APPIDS: List[str] = []
 
 
 def _looks_like_generic_epic_badge(url: str) -> bool:
@@ -86,6 +95,113 @@ def _looks_like_generic_epic_badge(url: str) -> bool:
         "logo-epic",
     )
     return any(token in text for token in noisy_tokens)
+
+
+def _normalize_bypass_category_id(value: Any) -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized in {"other", "others"}:
+        return "others"
+    return normalized
+
+
+def _load_bypass_priority_appids() -> List[str]:
+    global _BYPASS_PRIORITY_CACHE_MTIME
+    global _BYPASS_PRIORITY_APPIDS
+
+    try:
+        mtime = _BYPASS_CATEGORIES_FILE.stat().st_mtime
+    except OSError:
+        return []
+
+    with _BYPASS_PRIORITY_LOCK:
+        if _BYPASS_PRIORITY_CACHE_MTIME == mtime:
+            return list(_BYPASS_PRIORITY_APPIDS)
+
+        appids_by_category: Dict[str, List[str]] = {}
+        try:
+            payload = json.loads(_BYPASS_CATEGORIES_FILE.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            _BYPASS_PRIORITY_CACHE_MTIME = mtime
+            _BYPASS_PRIORITY_APPIDS = []
+            return []
+
+        categories = payload.get("categories")
+        if isinstance(categories, list):
+            for category in categories:
+                if not isinstance(category, dict):
+                    continue
+                category_id = _normalize_bypass_category_id(category.get("id"))
+                raw_games = category.get("games")
+                if not isinstance(raw_games, list):
+                    continue
+                bucket = appids_by_category.setdefault(category_id, [])
+                for raw_app_id in raw_games:
+                    app_id = str(raw_app_id or "").strip()
+                    if app_id and app_id.isdigit():
+                        bucket.append(app_id)
+
+        ordered: List[str] = []
+        seen: set[str] = set()
+        for category_id in _BYPASS_PRIORITY_CATEGORY_ORDER:
+            for app_id in appids_by_category.get(category_id, []):
+                if app_id in seen:
+                    continue
+                seen.add(app_id)
+                ordered.append(app_id)
+
+        _BYPASS_PRIORITY_CACHE_MTIME = mtime
+        _BYPASS_PRIORITY_APPIDS = ordered
+        return list(ordered)
+
+
+def _load_online_fix_priority_appids() -> List[str]:
+    global _ONLINE_FIX_PRIORITY_CACHE_MTIME
+    global _ONLINE_FIX_PRIORITY_APPIDS
+
+    try:
+        mtime = _ONLINE_FIX_FILE.stat().st_mtime
+    except OSError:
+        return []
+
+    with _ONLINE_FIX_PRIORITY_LOCK:
+        if _ONLINE_FIX_PRIORITY_CACHE_MTIME == mtime:
+            return list(_ONLINE_FIX_PRIORITY_APPIDS)
+
+        try:
+            payload = json.loads(_ONLINE_FIX_FILE.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            _ONLINE_FIX_PRIORITY_CACHE_MTIME = mtime
+            _ONLINE_FIX_PRIORITY_APPIDS = []
+            return []
+
+        ordered = []
+        if isinstance(payload, dict):
+            ordered = sorted(
+                (str(app_id).strip() for app_id in payload.keys() if str(app_id).strip().isdigit()),
+                key=lambda value: int(value),
+            )
+
+        _ONLINE_FIX_PRIORITY_CACHE_MTIME = mtime
+        _ONLINE_FIX_PRIORITY_APPIDS = ordered
+        return list(ordered)
+
+
+def _build_priority_candidate_appids(scope_set: Optional[set[str]] = None) -> List[str]:
+    candidates: List[str] = []
+    for source in (
+        DENUVO_APP_IDS,
+        _load_bypass_priority_appids(),
+        _load_online_fix_priority_appids(),
+        get_hot_appids(),
+    ):
+        for app_id in source:
+            app_str = str(app_id).strip()
+            if not app_str:
+                continue
+            if scope_set is not None and app_str not in scope_set:
+                continue
+            candidates.append(app_str)
+    return candidates
 
 
 def ensure_global_index_schema(force: bool = False) -> None:
@@ -123,6 +239,24 @@ def _with_schema_retry(action):
 def normalize_title(value: str) -> str:
     cleaned = _NON_ALNUM.sub(" ", (value or "").strip().lower())
     return " ".join(cleaned.split())
+
+
+def _compact_alnum(value: str) -> str:
+    return "".join(ch for ch in str(value or "").lower() if ch.isalnum())
+
+
+def _split_compact_query(value: str) -> Tuple[str, str]:
+    compact = _compact_alnum(value)
+    letters = "".join(ch for ch in compact if ch.isalpha())
+    digits = "".join(ch for ch in compact if ch.isdigit())
+    return letters, digits
+
+
+def _build_initials_like_pattern(letters: str) -> str:
+    normalized = "".join(ch for ch in str(letters or "").lower() if ch.isalpha())
+    if len(normalized) < 2:
+        return ""
+    return " ".join(f"{ch}%" for ch in normalized)
 
 
 def _is_placeholder_title_name(name: Any, app_id: Optional[str] = None) -> bool:
@@ -1710,29 +1844,27 @@ def list_catalog(
             if total <= 0:
                 return 0, []
 
-            candidates: list[str] = []
-            for app_id in DENUVO_APP_IDS:
-                app_str = str(app_id)
-                if scope_set is not None and app_str not in scope_set:
-                    continue
-                candidates.append(app_str)
-            for app_id in get_hot_appids():
-                app_str = str(app_id)
-                if scope_set is not None and app_str not in scope_set:
-                    continue
-                candidates.append(app_str)
+            candidates = _build_priority_candidate_appids(scope_set)
+            candidate_unique: list[str] = []
+            if candidates:
+                seen_candidates: set[str] = set()
+                for app_id in candidates:
+                    if app_id in seen_candidates:
+                        continue
+                    seen_candidates.add(app_id)
+                    candidate_unique.append(app_id)
 
             priority_ids: list[str] = []
-            if candidates:
+            if candidate_unique:
                 # Only keep candidates that exist in current scope.
                 existing_rows = (
-                    query.filter(SteamTitle.app_id.in_(candidates))
+                    query.filter(SteamTitle.app_id.in_(candidate_unique))
                     .with_entities(SteamTitle.app_id)
                     .all()
                 )
                 existing = {row[0] for row in existing_rows if row and row[0]}
                 seen: set[str] = set()
-                for app_id in candidates:
+                for app_id in candidate_unique:
                     if app_id in existing and app_id not in seen:
                         priority_ids.append(app_id)
                         seen.add(app_id)
@@ -1807,6 +1939,11 @@ def search_catalog(
 
         max_limit = min(max(1, limit), max(1, STEAM_GLOBAL_INDEX_SEARCH_LIMIT))
         normalized = normalize_title(query)
+        compact_query = _compact_alnum(query)
+        letters_only, digits_only = _split_compact_query(query)
+        initials_pattern = ""
+        if " " not in query.strip() and compact_query and 2 <= len(letters_only) <= 8:
+            initials_pattern = _build_initials_like_pattern(letters_only)
 
         base = db.query(SteamTitle)
         if query.isdigit():
@@ -1840,7 +1977,9 @@ def search_catalog(
             *[(SteamTitle.normalized_name.ilike(pattern), 1) for pattern in noise_patterns],
             else_=0,
         )
-        relevance_score = case(
+        compact_name = func.replace(SteamTitle.normalized_name, " ", "")
+
+        relevance_conditions = [
             (SteamTitle.app_id == query, 900),
             (func.lower(SteamTitle.name) == lowered_query, 800),
             (SteamTitle.normalized_name == normalized, 780),
@@ -1850,16 +1989,63 @@ def search_catalog(
             (SteamTitle.app_id.ilike(f"{query}%"), 700),
             (SteamTitle.id.in_(alias_subq), 520),
             (SteamTitle.normalized_name.ilike(f"%{normalized}%"), 500),
-            else_=0,
-        )
-
-        rows_query = base.filter(
-            or_(
-                SteamTitle.normalized_name.ilike(f"%{normalized}%"),
-                SteamTitle.app_id.ilike(f"{query}%"),
-                SteamTitle.id.in_(alias_subq),
+        ]
+        if compact_query and compact_query != normalized:
+            relevance_conditions.extend(
+                [
+                    (compact_name == compact_query, 750),
+                    (compact_name.ilike(f"{compact_query}%"), 735),
+                    (compact_name.ilike(f"%{compact_query}%"), 680),
+                ]
             )
-        )
+        if initials_pattern:
+            relevance_conditions.extend(
+                [
+                    (SteamTitle.normalized_name.ilike(initials_pattern), 730),
+                    (SteamTitle.normalized_name.ilike(f"% {initials_pattern}"), 720),
+                ]
+            )
+            if digits_only:
+                relevance_conditions.extend(
+                    [
+                        (
+                            and_(
+                                SteamTitle.normalized_name.ilike(initials_pattern),
+                                SteamTitle.normalized_name.ilike(f"%{digits_only}%"),
+                            ),
+                            740,
+                        ),
+                        (
+                            and_(
+                                SteamTitle.normalized_name.ilike(f"% {initials_pattern}"),
+                                SteamTitle.normalized_name.ilike(f"%{digits_only}%"),
+                            ),
+                            735,
+                        ),
+                    ]
+                )
+        relevance_score = case(*relevance_conditions, else_=0)
+
+        match_conditions = [
+            SteamTitle.normalized_name.ilike(f"%{normalized}%"),
+            SteamTitle.app_id.ilike(f"{query}%"),
+            SteamTitle.id.in_(alias_subq),
+        ]
+        if compact_query and compact_query != normalized:
+            match_conditions.append(compact_name.ilike(f"%{compact_query}%"))
+        if initials_pattern:
+            initials_match = or_(
+                SteamTitle.normalized_name.ilike(initials_pattern),
+                SteamTitle.normalized_name.ilike(f"% {initials_pattern}"),
+            )
+            if digits_only:
+                initials_match = or_(
+                    and_(SteamTitle.normalized_name.ilike(initials_pattern), SteamTitle.normalized_name.ilike(f"%{digits_only}%")),
+                    and_(SteamTitle.normalized_name.ilike(f"% {initials_pattern}"), SteamTitle.normalized_name.ilike(f"%{digits_only}%")),
+                )
+            match_conditions.append(initials_match)
+
+        rows_query = base.filter(or_(*match_conditions))
 
         if include_dlc is False:
             rows_query = rows_query.filter(
@@ -1888,13 +2074,10 @@ def search_catalog(
         priority_ids: List[str] = []
         if rank_mode in {"hot", "priority", "top"}:
             seen: set[str] = set()
-            for app_id in DENUVO_APP_IDS:
-                app_str = str(app_id)
-                if app_str not in seen:
-                    priority_ids.append(app_str)
-                    seen.add(app_str)
-            for app_id in get_hot_appids():
-                app_str = str(app_id)
+            for app_id in _build_priority_candidate_appids():
+                app_str = str(app_id).strip()
+                if not app_str:
+                    continue
                 if app_str not in seen:
                     priority_ids.append(app_str)
                     seen.add(app_str)

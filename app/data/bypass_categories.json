@@ -5,35 +5,35 @@
       "name": "EA APP",
       "description": "Electronic Arts games requiring EA App/Origin",
       "icon": "ea",
-      "games": ["1262560", "1846380", "1693980", "1222680", "1313860", "1506830", "2963840", "3629260", "1904540"]
+      "games": ["1262560", "1846380", "1693980", "1222680", "1313860", "1506830", "2963840", "3629260", "1904540", "3059520", "1222700"]
     },
     {
       "id": "ubisoft",
       "name": "UBISOFT",
       "description": "Ubisoft games requiring Ubisoft Connect",
       "icon": "ubisoft",
-      "games": ["812140", "582160", "208480", "911400", "3035570", "2208920", "289650", "368500", "220240", "298110", "552520", "939960", "371660", "243470", "447040", "2239550", "916440", "950050"]
+      "games": ["812140", "582160", "208480", "911400", "3035570", "2208920", "289650", "368500", "220240", "298110", "552520", "939960", "371660", "243470", "447040", "2239550", "916440", "950050", "3159330"]
     },
     {
       "id": "rockstar",
       "name": "ROCKSTAR",
       "description": "Rockstar Games requiring Rockstar Launcher",
       "icon": "rockstar",
-      "games": ["1174180", "3240220"]
+      "games": ["1174180", "3240220", "271590"]
     },
     {
       "id": "denuvo",
       "name": "DENUVO",
       "description": "Games with Denuvo anti-tamper protection",
       "icon": "denuvo",
-      "games": ["1172380", "2050650", "1413480", "1687950", "2215260", "2055290", "2680010", "1817230", "1551360", "1382330", "1113000", "990080", "39140", "287700", "1244460", "1874000", "532210", "601150", "594570", "3764200", "2358720", "3489700", "2215430", "1237320", "1777620", "2486820", "2513280", "1794960", "1235140", "2072450", "2161700", "1285190", "809890"]
+      "games": ["1172380", "2050650", "1413480", "1687950", "2215260", "2055290", "2680010", "1817230", "1382330", "1113000", "990080", "39140", "287700", "1244460", "1874000", "532210", "601150", "594570", "3764200", "2358720", "3489700", "2215430", "1237320", "1777620", "2486820", "2513280", "1794960", "1235140", "2072450", "2161700", "1285190", "809890", "1941540", "356190", "517630", "1222690", "624090", "782330", "3937550", "1196590"]
     },
     {
       "id": "other",
       "name": "OTHER",
       "description": "Other games and platforms",
       "icon": "other",
-      "games": ["1903340"]
+      "games": ["1903340", "2000950", "3595230", "3595270", "456610", "592580", "770240", "1702010", "2988580", "638970", "1259970", "686060", "225540", "1778820", "1551360"]
     }
   ],
   "games": {
@@ -227,9 +227,9 @@
       "category": "ubisoft"
     },
     "1551360": {
-      "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/FH5_Fix_Repair_Steam_V10_Generic.rar?download=true",
+      "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/C.r.ack%20files/forzahorizon5.rar?download=true",
       "name": "Forza Horizon 5",
-      "category": "denuvo"
+      "category": "other"
     },
     "809890": {
       "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/C.r.ack%20files/Shining.Resonance.Refrain.Crack.Only-voices38.rar?download=true",
@@ -307,6 +307,11 @@
       "name": "GRAND THEFT AUTO V ENHANCED",
       "category": "rockstar"
     },
+    "271590": {
+      "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/C.r.ack%20files/GRAND%20THEFT%20AUTO%20V%20LEGACY.rar?download=true",
+      "name": "GRAND THEFT AUTO V LEGACY",
+      "category": "rockstar"
+    },
     "2215430": {
       "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/C.r.ack%20files/Ghost%20of%20Tsushima%20DIRECTOR'S%20CUT%20crack.rar?download=true",
       "name": "Ghost of Tsushima Director's Cut",
@@ -352,7 +357,7 @@
       "category": "denuvo"
     },
     "2161700": {
-      "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/C.r.ack%20files/Persona.3.Reload.HYPERVISOR.AMD.zip?download=true",
+      "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/C.r.ack%20files/Persona.3.Reload.HYPERVISOR.UPDATE-REFLEX.zip?download=true",
       "name": "Persona 3 Reload (AMD Only)",
       "category": "denuvo"
     },
@@ -360,6 +365,138 @@
       "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/C.r.ack%20files/Borderlands.4.HYPERVISOR-KIRIGIRI.rar?download=true",
       "name": "Borderlands 4",
       "note": "Hypervisor Beta Crack - Not recommended for inexperienced users",
+      "category": "denuvo"
+    },
+    "3159330": {
+      "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/C.r.ack%20files/Assassins.Creed.Shadows.HYPERVISOR.BETA2.zip?download=true",
+      "name": "Assassin's Creed Shadows",
+      "note": "Hypervisor Beta Crack - Not recommended for inexperienced users",
+      "category": "ubisoft"
+    },
+    "2000950": {
+      "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/C.r.ack%20files/COD_mw2019_0xoLemon_crackfix.rar?download=true",
+      "name": "Call of Duty: Modern Warfare (2019)",
+      "category": "other"
+    },
+    "3595230": {
+      "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/C.r.ack%20files/CALL%20OF%20DUTY%20MODERN%20WARFARE%202.rar?download=true",
+      "name": "Call of Duty: Modern Warfare II",
+      "category": "other"
+    },
+    "3595270": {
+      "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/C.r.ack%20files/CALL%20OF%20DUTY%20MODERN%20WARFARE%203.rar?download=true",
+      "name": "Call of Duty: Modern Warfare III",
+      "category": "other"
+    },
+    "3059520": {
+      "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/C.r.ack%20files/F1%2025.rar?download=true",
+      "name": "F1 25",
+      "category": "ea"
+    },
+    "1941540": {
+      "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/C.r.ack%20files/MTOC.HYPERVISOR.B5.1.0xZeOn.rar?download=true",
+      "name": "Metaphor: ReFantazio",
+      "note": "Hypervisor Beta Crack - Not recommended for inexperienced users",
+      "category": "denuvo"
+    },
+    "456610": {
+      "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/C.r.ack%20files/PES2017_OxoLemon_crackfix.zip?download=true",
+      "name": "PES 2017",
+      "category": "other"
+    },
+    "592580": {
+      "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/C.r.ack%20files/PES18_OxoLemon_crackfix.rar?download=true",
+      "name": "PES 2018",
+      "category": "other"
+    },
+    "770240": {
+      "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/C.r.ack%20files/PES19_OxoLemon_crackfix.rar?download=true",
+      "name": "PES 2019",
+      "category": "other"
+    },
+    "1702010": {
+      "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/C.r.ack%20files/SengokuDynasty_0xoLemon_crackfixrune.rar?download=true",
+      "name": "Sengoku Dynasty",
+      "category": "other"
+    },
+    "2988580": {
+      "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/C.r.ack%20files/yakuza0directorcut_0xoLemon_crackfix.rar?download=true",
+      "name": "Yakuza 0 Director's Cut",
+      "category": "other"
+    },
+    "638970": {
+      "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/C.r.ack%20files/YAKUZA_0_0xoLemon_crackfix.rar?download=true",
+      "name": "Yakuza 0",
+      "category": "other"
+    },
+    "1259970": {
+      "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/C.r.ack%20files/eFootball_PES_0xoLemon_crackfix.rar?download=true",
+      "name": "eFootball PES",
+      "category": "other"
+    },
+    "686060": {
+      "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/C.r.ack%20files/Mewgenics_0xoLemon_CrackOnly.rar?download=true",
+      "name": "Mewgenics",
+      "category": "other"
+    },
+    "1222700": {
+      "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/C.r.ack%20files/A%20WAY%20OUT.rar?download=true",
+      "name": "A Way Out",
+      "category": "ea"
+    },
+    "225540": {
+      "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/C.r.ack%20files/JUST%20CAUSE%203.rar?download=true",
+      "name": "Just Cause 3",
+      "category": "other"
+    },
+    "356190": {
+      "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/C.r.ack%20files/MIDDLE-EARTH%20SHADOW%20OF%20WAR.rar?download=true",
+      "name": "Middle-earth: Shadow of War",
+      "category": "denuvo"
+    },
+    "517630": {
+      "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/C.r.ack%20files/justcause4_0xoLemon_crackfix.rar?download=true",
+      "name": "Just Cause 4",
+      "category": "denuvo"
+    },
+    "1222690": {
+      "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/C.r.ack%20files/dragonageinquisition_0xoLemon_crackfix.rar?download=true",
+      "name": "Dragon Age: Inquisition",
+      "category": "denuvo"
+    },
+    "624090": {
+      "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/C.r.ack%20files/fm18_0xoLemon_Crackfix.rar?download=true",
+      "name": "Football Manager 2018",
+      "category": "denuvo"
+    },
+    "782330": {
+      "links": [
+        {
+          "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/C.r.ack%20files/doomteternalgods.rar?download=true",
+          "name": "DOOM Eternal: The Ancient Gods (Recommended)"
+        },
+        {
+          "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/C.r.ack%20files/doometernaltheancientgods_0xoLemon_crackfix.rar?download=true",
+          "name": "DOOM Eternal: The Ancient Gods (Alternative)"
+        }
+      ],
+      "name": "DOOM Eternal: The Ancient Gods",
+      "category": "denuvo"
+    },
+    "3937550": {
+      "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/C.r.ack%20files/Yakuza.Kiwami.3.HYPERVISOR-REFLEX.BETA1.zip?download=true",
+      "name": "Yakuza Kiwami 3",
+      "note": "Hypervisor Beta Crack (AMD+Intel) - Not recommended for inexperienced users",
+      "category": "denuvo"
+    },
+    "1778820": {
+      "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/C.r.ack%20files/Tekken8_0xoLemon_crackfix.rar?download=true",
+      "name": "Tekken 8",
+      "category": "other"
+    },
+    "1196590": {
+      "link": "https://huggingface.co/datasets/MangaVNteam/Assassin-Creed-Odyssey-Crack/resolve/main/C.r.ack%20files/re8_0xoLemon_crackfix.rar?download=true",
+      "name": "Resident Evil Village",
       "category": "denuvo"
     }
   }

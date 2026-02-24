@@ -2,8 +2,9 @@ from pathlib import Path
 import os
 import re
 import sys
+import time
 from urllib.parse import unquote
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 import threading
@@ -30,6 +31,7 @@ from .models import ChatMessage
 from .migrations import ensure_schema
 from .seed import seed_games
 from .services.steam_catalog import get_lua_appids
+from .services.ai_observability import record_http_request, should_track_request
 from .services.steamgriddb import prewarm_steamgriddb_cache
 from .services.steam_global_index import get_ingest_status, ingest_full_catalog
 from .routes import (
@@ -76,9 +78,11 @@ from .routes import (
     cdn_v2,
     steam_index,
     p2p,
+    ai,
+    privacy,
 )
 from .websocket import manager
-from fastapi import WebSocket, WebSocketDisconnect, status, Request, HTTPException
+from fastapi import WebSocket, WebSocketDisconnect, status, HTTPException
 from fastapi.responses import JSONResponse, Response
 from jose import jwt, JWTError
 from .core.config import SECRET_KEY, ALGORITHM
@@ -148,6 +152,34 @@ app.add_middleware(
     expose_headers=["*"],
 )
 app.add_middleware(GZipMiddleware, minimum_size=1000)
+
+
+@app.middleware("http")
+async def ai_observability_middleware(request: Request, call_next):
+    path = str(request.url.path or "")
+    should_track = should_track_request(path)
+    if not should_track:
+        return await call_next(request)
+
+    started = time.perf_counter()
+    status_code = 500
+    try:
+        response = await call_next(request)
+        status_code = int(getattr(response, "status_code", 500) or 500)
+        return response
+    except Exception:
+        status_code = 500
+        raise
+    finally:
+        latency_ms = (time.perf_counter() - started) * 1000.0
+        record_http_request(
+            path=path,
+            method=request.method,
+            status_code=status_code,
+            latency_ms=latency_ms,
+            query_params=dict(request.query_params),
+        )
+
 
 def _ensure_storage_dirs() -> None:
     for path in (WORKSHOP_STORAGE_DIR, SCREENSHOT_STORAGE_DIR, BUILD_STORAGE_DIR):
@@ -367,6 +399,8 @@ app.include_router(updates_v2.router)
 app.include_router(cdn_v2.router)
 app.include_router(steam_index.router, prefix="/steam/index", tags=["steam-index"])
 app.include_router(p2p.router, prefix="/p2p", tags=["p2p"])
+app.include_router(ai.router, prefix="/ai", tags=["ai"])
+app.include_router(privacy.router, prefix="/privacy", tags=["privacy"])
 
 
 @app.websocket("/ws")
