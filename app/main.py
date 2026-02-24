@@ -21,6 +21,7 @@ from .core.config import (
     STEAM_GLOBAL_INDEX_BOOTSTRAP_ENABLED,
     STEAM_GLOBAL_INDEX_BOOTSTRAP_MIN_TITLES,
     STEAM_GLOBAL_INDEX_BOOTSTRAP_MAX_ITEMS,
+    STEAM_GLOBAL_INDEX_BOOTSTRAP_REQUIRE_API_KEY,
     STEAM_GLOBAL_INDEX_AUTOSYNC_ENABLED,
     STEAM_GLOBAL_INDEX_AUTOSYNC_INTERVAL_SECONDS,
     STEAM_GLOBAL_INDEX_AUTOSYNC_INITIAL_DELAY_SECONDS,
@@ -286,6 +287,10 @@ def _recover_stale_running_ingest(
 
 def _bootstrap_global_index_if_needed() -> None:
     if not GLOBAL_INDEX_V1 or not STEAM_GLOBAL_INDEX_BOOTSTRAP_ENABLED:
+        return
+
+    if STEAM_GLOBAL_INDEX_BOOTSTRAP_REQUIRE_API_KEY and not str(STEAM_WEB_API_KEY or "").strip():
+        print("Global index bootstrap skipped (STEAM_WEB_API_KEY missing)")
         return
 
     min_titles = max(1, int(STEAM_GLOBAL_INDEX_BOOTSTRAP_MIN_TITLES or 0))

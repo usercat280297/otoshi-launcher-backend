@@ -1686,6 +1686,35 @@ def ingest_global_catalog(
     if max_items and max_items > 0:
         apps = apps[: max_items]
 
+    if official_only and not apps:
+        message = "Official Steam catalog unavailable; check STEAM_WEB_API_KEY and Steam API access."
+        job.status = "failed"
+        job.error_message = message
+        job.failure_count = 1
+        job.meta = {
+            **(job.meta or {}),
+            "source": source,
+            "stage": "seed_unavailable",
+            "official_only": True,
+            "heartbeat_at": datetime.utcnow().isoformat(),
+        }
+        job.completed_at = datetime.utcnow()
+        db.commit()
+        return {
+            "job_id": job.id,
+            "processed": 0,
+            "success": 0,
+            "failed": 1,
+            "steamdb_success": 0,
+            "steamdb_failed": 0,
+            "cross_store_success": 0,
+            "cross_store_failed": 0,
+            "completion_processed": 0,
+            "completion_failed": 0,
+            "started_at": started.isoformat(),
+            "completed_at": (job.completed_at or datetime.utcnow()).isoformat(),
+        }
+
     processed = 0
     created_or_updated = 0
     failed = 0
@@ -2618,7 +2647,12 @@ def ingest_full_catalog(
     }
     db.commit()
 
-    result = ingest_global_catalog(db=db, max_items=max_items, enrich_details=True)
+    result = ingest_global_catalog(
+        db=db,
+        max_items=max_items,
+        enrich_details=True,
+        official_only=True,
+    )
     latest = (
         db.query(IngestJob)
         .filter(IngestJob.id == result.get("job_id"))
@@ -2652,7 +2686,12 @@ def resume_ingest_catalog(
         .first()
     )
     effective_token = str(resume_token or (cursor.cursor_value if cursor else "") or "").strip()
-    result = ingest_global_catalog(db=db, max_items=max_items, enrich_details=True)
+    result = ingest_global_catalog(
+        db=db,
+        max_items=max_items,
+        enrich_details=True,
+        official_only=True,
+    )
     latest = (
         db.query(IngestJob)
         .filter(IngestJob.id == result.get("job_id"))

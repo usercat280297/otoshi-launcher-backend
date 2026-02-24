@@ -251,10 +251,12 @@ class SteamIndexAssetOut(BaseModel):
 class SteamIndexIngestLatestJobOut(BaseModel):
     id: Optional[str] = None
     status: str = "idle"
+    source: Optional[str] = None
     processed_count: int = 0
     success_count: int = 0
     failure_count: int = 0
     started_at: Optional[str] = None
+    updated_at: Optional[str] = None
     completed_at: Optional[str] = None
     error_message: Optional[str] = None
     phase: Optional[str] = None
@@ -317,6 +319,7 @@ class SteamIndexAssetBatchOut(BaseModel):
 class SteamIndexIngestRebuildIn(BaseModel):
     max_items: Optional[int] = None
     enrich_details: bool = True
+    official_only: bool = True
 
 
 class SteamIndexIngestFullIn(BaseModel):

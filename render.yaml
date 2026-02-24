@@ -42,6 +42,8 @@ services:
         value: "true"
       - key: STEAM_GLOBAL_INDEX_AUTOSYNC_REQUIRE_API_KEY
         value: "true"
+      - key: STEAM_GLOBAL_INDEX_BOOTSTRAP_REQUIRE_API_KEY
+        value: "true"
       - key: STEAM_GLOBAL_INDEX_AUTOSYNC_INTERVAL_SECONDS
         value: "900"
       - key: STEAM_GLOBAL_INDEX_AUTOSYNC_INITIAL_DELAY_SECONDS

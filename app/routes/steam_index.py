@@ -430,6 +430,7 @@ def steam_index_ingest_rebuild(
         db=db,
         max_items=payload.max_items,
         enrich_details=payload.enrich_details,
+        official_only=payload.official_only,
     )
 
 
