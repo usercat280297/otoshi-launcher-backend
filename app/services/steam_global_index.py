@@ -82,6 +82,28 @@ _ONLINE_FIX_PRIORITY_CACHE_MTIME: Optional[float] = None
 _ONLINE_FIX_PRIORITY_APPIDS: List[str] = []
 _LUA_FALLBACK_SEED_RETRY_ATTEMPTS = 15
 _LUA_FALLBACK_SEED_RETRY_DELAY_SECONDS = 2
+_GAME_LIKE_TITLE_TYPES = ("game", "dlc", "demo", "mod")
+_TOOL_LIKE_TITLE_TYPES = (
+    "application",
+    "tool",
+    "software",
+    "video",
+    "movie",
+    "hardware",
+    "driver",
+    "episode",
+    "series",
+    "guide",
+    "advertising",
+)
+_TOOL_NAME_HINT_PATTERNS = (
+    "% dedicated server%",
+    "% sdk%",
+    "% benchmark%",
+    "% level editor%",
+    "% test server%",
+    "% mod tools%",
+)
 
 
 def _looks_like_generic_epic_badge(url: str) -> bool:
@@ -293,6 +315,18 @@ def _pick_best_title_name(app_id: str, *candidates: Any) -> str:
         return normalized[0]
 
     return f"Steam App {app_id_text}" if app_id_text else ""
+
+
+def _title_type_rank_expr():
+    tool_name_hint = or_(
+        *[SteamTitle.normalized_name.ilike(pattern) for pattern in _TOOL_NAME_HINT_PATTERNS]
+    )
+    return case(
+        (SteamTitle.title_type.in_(_GAME_LIKE_TITLE_TYPES), 0),
+        (SteamTitle.title_type.in_(_TOOL_LIKE_TITLE_TYPES), 3),
+        (tool_name_hint, 3),
+        else_=1,
+    )
 
 
 def _steam_applist_url() -> str:
@@ -2004,6 +2038,7 @@ def list_catalog(
 ) -> Tuple[int, List[Dict[str, Any]]]:
     def _run():
         manifest_name_map = _read_manifest_name_map()
+        type_rank = _title_type_rank_expr()
         query = db.query(SteamTitle)
         scope_set: Optional[set[str]] = None
         if scope in {"library", "owned"}:
@@ -2058,7 +2093,7 @@ def list_catalog(
                 rest_offset = offset_value - priority_total
                 page_rows = (
                     rest_query()
-                    .order_by(desc(SteamTitle.updated_at), SteamTitle.name.asc())
+                    .order_by(type_rank.asc(), desc(SteamTitle.updated_at), SteamTitle.name.asc())
                     .offset(rest_offset)
                     .limit(remaining_limit)
                     .all()
@@ -2075,7 +2110,7 @@ def list_catalog(
                 if remaining_limit > 0:
                     rest_rows = (
                         rest_query()
-                        .order_by(desc(SteamTitle.updated_at), SteamTitle.name.asc())
+                        .order_by(type_rank.asc(), desc(SteamTitle.updated_at), SteamTitle.name.asc())
                         .offset(0)
                         .limit(remaining_limit)
                         .all()
@@ -2084,11 +2119,11 @@ def list_catalog(
 
             return total, [_build_catalog_item(row, manifest_name_map) for row in page_rows]
         if sort_value in {"recent", "updated"}:
-            query = query.order_by(desc(SteamTitle.updated_at), SteamTitle.name.asc())
+            query = query.order_by(type_rank.asc(), desc(SteamTitle.updated_at), SteamTitle.name.asc())
         elif sort_value == "appid":
-            query = query.order_by(SteamTitle.app_id.asc())
+            query = query.order_by(type_rank.asc(), SteamTitle.app_id.asc())
         else:
-            query = query.order_by(SteamTitle.name.asc())
+            query = query.order_by(type_rank.asc(), SteamTitle.name.asc())
 
         total = query.count()
         rows = query.offset(max(0, offset)).limit(max(1, limit)).all()
@@ -2108,6 +2143,7 @@ def search_catalog(
 ) -> Tuple[int, List[Dict[str, Any]]]:
     def _run():
         manifest_name_map = _read_manifest_name_map()
+        type_rank = _title_type_rank_expr()
         query = (q or "").strip()
         if not query:
             return 0, []
@@ -2266,6 +2302,7 @@ def search_catalog(
                 priority_rank.desc(),
                 SteamTitle.updated_at.desc(),
                 relevance_score.desc(),
+                type_rank.asc(),
                 noise_penalty.asc(),
                 name_length.asc(),
                 SteamTitle.name.asc(),
@@ -2274,6 +2311,7 @@ def search_catalog(
             rows_query = rows_query.order_by(
                 priority_rank.desc(),
                 relevance_score.desc(),
+                type_rank.asc(),
                 noise_penalty.asc(),
                 name_length.asc(),
                 SteamTitle.updated_at.desc(),
