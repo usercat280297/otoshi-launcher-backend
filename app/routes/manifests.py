@@ -1,16 +1,24 @@
-from fastapi import APIRouter, Depends, HTTPException
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 import json
 import os
 from pathlib import Path
 
 from ..db import get_db
-from ..models import Game
+from ..models import Game, User
 from ..services.chunk_manifests import get_version_override_for_slug
+from ..services.download_source_policy import (
+    apply_manifest_source_policy,
+    decide_download_source_policy,
+    is_vip_identity,
+)
 from ..services.manifest import build_manifest
 from ..core.cache import cache_client
 from ..core.config import MANIFEST_REMOTE_ONLY
 from ..services.remote_game_data import get_manifest_from_server
+from .deps import get_current_user_optional
 
 router = APIRouter()
 _MANIFEST_CACHE_TTL_SECONDS = 24 * 60 * 60
@@ -75,8 +83,46 @@ def get_local_manifest(game_slug: str, version: str = None):
     
     return None
 
+
+def _manifest_size_bytes(payload: dict) -> Optional[int]:
+    for key in ("compressed_size", "total_size", "size_bytes"):
+        value = payload.get(key)
+        try:
+            if value is None:
+                continue
+            parsed = int(value)
+            if parsed > 0:
+                return parsed
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def _with_source_policy(
+    payload: dict,
+    *,
+    current_user: Optional[User],
+    method: Optional[str],
+) -> dict:
+    decision = decide_download_source_policy(
+        game_size_bytes=_manifest_size_bytes(payload),
+        is_vip=is_vip_identity(current_user),
+        method=method,
+    )
+    rewritten, _ = apply_manifest_source_policy(payload, decision=decision)
+    if method:
+        source_policy = rewritten.get("source_policy")
+        if isinstance(source_policy, dict):
+            source_policy["requested_method"] = method
+    return rewritten
+
 @router.get("/{slug}")
-def get_manifest(slug: str, db: Session = Depends(get_db)):
+def get_manifest(
+    slug: str,
+    method: Optional[str] = Query(default=None),
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
+):
     version_hint = get_version_override_for_slug(slug) or "latest"
     cache_key = f"manifest:{slug}:{version_hint}"
     cached = cache_client.get_json(cache_key)
@@ -89,7 +135,7 @@ def get_manifest(slug: str, db: Session = Depends(get_db)):
                     cached,
                     ttl=_MANIFEST_CACHE_TTL_SECONDS,
                 )
-            return cached
+            return _with_source_policy(cached, current_user=current_user, method=method)
         # Drop stale/incompatible cache payloads from older builds.
         cache_client.delete(cache_key)
         cache_client.delete(f"manifest:{slug}")
@@ -119,7 +165,7 @@ def get_manifest(slug: str, db: Session = Depends(get_db)):
                 remote_manifest,
                 ttl=_MANIFEST_CACHE_TTL_SECONDS,
             )
-        return remote_manifest
+        return _with_source_policy(remote_manifest, current_user=current_user, method=method)
 
     # Fallback to database
     game = db.query(Game).filter(Game.slug == slug).first()
@@ -137,4 +183,4 @@ def get_manifest(slug: str, db: Session = Depends(get_db)):
         manifest,
         ttl=_MANIFEST_CACHE_TTL_SECONDS,
     )
-    return manifest
+    return _with_source_policy(manifest, current_user=current_user, method=method)

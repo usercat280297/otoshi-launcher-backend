@@ -54,6 +54,8 @@ class UserOut(BaseModel):
     is_active: Optional[bool] = None
     is_verified: Optional[bool] = None
     role: Optional[str] = None
+    membership_tier: Optional[str] = None
+    membership_expires_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -319,7 +321,7 @@ class SteamIndexAssetBatchOut(BaseModel):
 class SteamIndexIngestRebuildIn(BaseModel):
     max_items: Optional[int] = None
     enrich_details: bool = True
-    official_only: bool = True
+    official_only: bool = False
 
 
 class SteamIndexIngestFullIn(BaseModel):
@@ -542,6 +544,11 @@ class DownloadVersionOut(BaseModel):
     size_bytes: Optional[int] = None
 
 
+class DownloadSourcePolicyPreviewOut(BaseModel):
+    non_vip: dict = Field(default_factory=dict)
+    vip: dict = Field(default_factory=dict)
+
+
 class DownloadOptionsOut(BaseModel):
     app_id: str
     name: str
@@ -555,6 +562,7 @@ class DownloadOptionsOut(BaseModel):
     install_path: str
     free_bytes: Optional[int] = None
     total_bytes: Optional[int] = None
+    source_policy_preview: Optional[DownloadSourcePolicyPreviewOut] = None
 
 
 class DownloadPrepareIn(BaseModel):
@@ -1098,6 +1106,56 @@ class CommunityCommentOut(BaseModel):
     app_id: Optional[str] = None
     app_name: Optional[str] = None
     created_at: datetime
+
+
+class CommunityMemberOut(BaseModel):
+    user_id: str
+    username: str
+    display_name: Optional[str] = None
+    avatar_url: Optional[str] = None
+    membership_tier: Optional[str] = None
+    is_online: bool = False
+    last_seen_at: Optional[datetime] = None
+
+
+class DonationLeaderboardEntryOut(BaseModel):
+    rank: int
+    user_id: str
+    username: str
+    display_name: Optional[str] = None
+    avatar_url: Optional[str] = None
+    membership_tier: Optional[str] = None
+    is_online: bool = False
+    last_seen_at: Optional[datetime] = None
+    total_amount: float
+    currency: str
+
+
+class SupportProfileOut(BaseModel):
+    tier: Optional[str] = None
+    expires_at: Optional[datetime] = None
+    lifetime_total: float = 0.0
+    period_total: float = 0.0
+    rank: Optional[int] = None
+    currency: str = "USD"
+
+
+class DonationCreateIn(BaseModel):
+    amount: float = Field(gt=0)
+    currency: str = Field(default="USD", min_length=3, max_length=10)
+    provider: Optional[str] = Field(default="donation", max_length=40)
+    note: Optional[str] = Field(default=None, max_length=500)
+
+
+class DonationOut(BaseModel):
+    id: str
+    amount: float
+    currency: str
+    provider: str
+    note: Optional[str] = None
+    created_at: datetime
+    tier: Optional[str] = None
+    tier_expires_at: Optional[datetime] = None
 
 
 class ReviewIn(BaseModel):

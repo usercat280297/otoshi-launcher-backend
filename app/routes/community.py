@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from pathlib import Path
+from datetime import datetime, timedelta
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from ..core.config import SCREENSHOT_STORAGE_DIR
@@ -12,17 +14,21 @@ from ..db import get_db
 from ..models import (
     ActivityEvent,
     Friendship,
+    P2PPeer,
     Review,
     ReviewVote,
     Screenshot,
+    SupportDonation,
     User,
     UserProfile,
 )
 from ..websocket import manager
 from ..schemas import (
     ActivityEventOut,
+    CommunityMemberOut,
     CommunityCommentIn,
     CommunityCommentOut,
+    DonationLeaderboardEntryOut,
     ReviewIn,
     ReviewOut,
     ScreenshotOut,
@@ -33,6 +39,12 @@ from ..schemas import (
 from .deps import get_current_user
 
 router = APIRouter()
+_MEMBER_ONLINE_TTL_SECONDS = 90
+_LEADERBOARD_PERIOD_DAYS = {
+    "week": 7,
+    "month": 30,
+    "year": 365,
+}
 
 
 def _emit_activity(db: Session, user_id: str, event_type: str, payload: dict) -> None:
@@ -67,6 +79,50 @@ def _serialize_comment(event: ActivityEvent, user: Optional[User]) -> dict:
         "app_name": payload.get("app_name"),
         "created_at": event.created_at,
     }
+
+
+def _resolve_last_seen_map(db: Session, user_ids: list[str]) -> dict[str, datetime]:
+    if not user_ids:
+        return {}
+    rows = (
+        db.query(P2PPeer.user_id, func.max(P2PPeer.last_seen_at))
+        .filter(P2PPeer.user_id.in_(user_ids))
+        .group_by(P2PPeer.user_id)
+        .all()
+    )
+    out: dict[str, datetime] = {}
+    for user_id, last_seen in rows:
+        if user_id and isinstance(last_seen, datetime):
+            out[str(user_id)] = last_seen
+    return out
+
+
+def _compute_member_presence(
+    *,
+    user: User,
+    peer_last_seen: Optional[datetime],
+    cutoff: datetime,
+) -> tuple[bool, Optional[datetime]]:
+    candidates: list[datetime] = []
+    if isinstance(user.last_login, datetime):
+        candidates.append(user.last_login)
+    if isinstance(peer_last_seen, datetime):
+        candidates.append(peer_last_seen)
+    if not candidates:
+        return False, None
+    last_seen = max(candidates)
+    return last_seen >= cutoff, last_seen
+
+
+def _membership_sort_key(value: Optional[str]) -> tuple[int, str]:
+    normalized = str(value or "").strip().lower()
+    ranking = {
+        "vip": 0,
+        "supporter_plus": 1,
+        "supporter": 2,
+        "": 3,
+    }
+    return ranking.get(normalized, 4), normalized
 
 
 @router.get("/profile/{user_id}")
@@ -182,6 +238,115 @@ async def publish_community_comment(
     comment = _serialize_comment(event, current_user)
     await manager.broadcast({"type": "community_comment", "payload": comment})
     return comment
+
+
+@router.get("/members", response_model=List[CommunityMemberOut])
+def list_community_members(
+    limit: int = 120,
+    db: Session = Depends(get_db),
+):
+    normalized_limit = min(max(int(limit), 1), 500)
+    users = (
+        db.query(User)
+        .filter(User.is_active.is_(True))
+        .order_by(User.created_at.asc())
+        .limit(normalized_limit)
+        .all()
+    )
+
+    user_ids = [user.id for user in users if user.id]
+    last_seen_map = _resolve_last_seen_map(db, user_ids)
+    cutoff = datetime.utcnow() - timedelta(seconds=_MEMBER_ONLINE_TTL_SECONDS)
+
+    members: list[dict] = []
+    for user in users:
+        is_online, last_seen = _compute_member_presence(
+            user=user,
+            peer_last_seen=last_seen_map.get(user.id),
+            cutoff=cutoff,
+        )
+        members.append(
+            {
+                "user_id": user.id,
+                "username": user.username,
+                "display_name": user.display_name,
+                "avatar_url": user.avatar_url,
+                "membership_tier": user.membership_tier,
+                "is_online": is_online,
+                "last_seen_at": last_seen,
+            }
+        )
+
+    members.sort(
+        key=lambda item: (
+            0 if item.get("is_online") else 1,
+            _membership_sort_key(item.get("membership_tier")),
+            -(item.get("last_seen_at").timestamp() if item.get("last_seen_at") else 0),
+            str(item.get("display_name") or item.get("username") or "").lower(),
+        )
+    )
+    return members
+
+
+@router.get("/leaderboard/donations", response_model=List[DonationLeaderboardEntryOut])
+def donation_leaderboard(
+    period: str = "week",
+    limit: int = 20,
+    db: Session = Depends(get_db),
+):
+    normalized_period = str(period or "week").strip().lower()
+    if normalized_period not in _LEADERBOARD_PERIOD_DAYS:
+        raise HTTPException(status_code=400, detail="Invalid period")
+
+    normalized_limit = min(max(int(limit), 1), 100)
+    since = datetime.utcnow() - timedelta(days=_LEADERBOARD_PERIOD_DAYS[normalized_period])
+
+    rows = (
+        db.query(
+            SupportDonation.user_id.label("user_id"),
+            func.coalesce(func.sum(SupportDonation.amount), 0.0).label("total_amount"),
+            func.max(SupportDonation.currency).label("currency"),
+        )
+        .filter(SupportDonation.created_at >= since)
+        .group_by(SupportDonation.user_id)
+        .order_by(func.sum(SupportDonation.amount).desc())
+        .limit(normalized_limit)
+        .all()
+    )
+
+    user_ids = [str(row.user_id) for row in rows if row.user_id]
+    users = db.query(User).filter(User.id.in_(user_ids)).all() if user_ids else []
+    user_map = {str(user.id): user for user in users}
+    last_seen_map = _resolve_last_seen_map(db, user_ids)
+    cutoff = datetime.utcnow() - timedelta(seconds=_MEMBER_ONLINE_TTL_SECONDS)
+
+    leaderboard: list[dict] = []
+    for index, row in enumerate(rows, start=1):
+        user_id = str(row.user_id)
+        user = user_map.get(user_id)
+        if not user:
+            continue
+        is_online, last_seen = _compute_member_presence(
+            user=user,
+            peer_last_seen=last_seen_map.get(user_id),
+            cutoff=cutoff,
+        )
+        leaderboard.append(
+            {
+                "rank": index,
+                "user_id": user.id,
+                "username": user.username,
+                "display_name": user.display_name,
+                "avatar_url": user.avatar_url,
+                "membership_tier": user.membership_tier,
+                "is_online": is_online,
+                "last_seen_at": last_seen,
+                "total_amount": float(row.total_amount or 0.0),
+                "currency": str(row.currency or "USD"),
+            }
+        )
+
+    return leaderboard
 
 
 @router.get("/reviews/{game_id}", response_model=List[ReviewOut])

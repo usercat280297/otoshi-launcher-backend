@@ -40,11 +40,14 @@ class User(Base):
     is_active = Column(Boolean, default=True)
     is_verified = Column(Boolean, default=False)
     role = Column(String(20), default="user")
+    membership_tier = Column(String(40), nullable=True)
+    membership_expires_at = Column(DateTime, nullable=True)
 
     library = relationship("LibraryEntry", back_populates="user", cascade="all, delete")
     downloads = relationship("DownloadTask", back_populates="user", cascade="all, delete")
     telemetry_events = relationship("TelemetryEvent", back_populates="user", cascade="all, delete")
     payments = relationship("PaymentTransaction", back_populates="user", cascade="all, delete")
+    support_donations = relationship("SupportDonation", back_populates="user", cascade="all, delete")
     licenses = relationship("License", back_populates="user", cascade="all, delete")
     friendships = relationship(
         "Friendship",
@@ -745,6 +748,20 @@ class PaymentTransaction(Base):
 
     user = relationship("User", back_populates="payments")
     game = relationship("Game", back_populates="payments")
+
+
+class SupportDonation(Base):
+    __tablename__ = "support_donations"
+
+    id = Column(String(36), primary_key=True, default=generate_id)
+    user_id = Column(String(36), ForeignKey("users.id"), nullable=False, index=True)
+    amount = Column(Float, default=0.0)
+    currency = Column(String(10), default="USD")
+    provider = Column(String(40), default="donation")
+    note = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+    user = relationship("User", back_populates="support_donations")
 
 
 class Friendship(Base):

@@ -8,6 +8,8 @@ import time
 import hmac
 import hashlib
 
+from .download_source_policy import decide_download_source_policy
+
 
 def _split_env(name: str, default: str) -> list[str]:
     value = os.getenv(name, default)
@@ -25,9 +27,15 @@ class OriginRoute:
     origin: str
     url: str
     fallbacks: list[str]
+    policy_applied: bool = False
+    reason_codes: list[str] | None = None
 
     def to_dict(self) -> dict:
-        return {"origin": self.origin, "url": self.url, "fallbacks": self.fallbacks}
+        payload = {"origin": self.origin, "url": self.url, "fallbacks": self.fallbacks}
+        if self.reason_codes is not None:
+            payload["policy_applied"] = self.policy_applied
+            payload["reason_codes"] = self.reason_codes
+        return payload
 
 
 def _normalize_path(path: str) -> str:
@@ -50,11 +58,23 @@ def resolve_origin_url(
     channel: str = "stable",
     signed: bool = False,
     ttl_seconds: int = 600,
+    game_size_bytes: Optional[int] = None,
+    is_vip: bool = False,
+    method: Optional[str] = None,
 ) -> OriginRoute:
     normalized = _normalize_path(relative_path)
     channel_name = (channel or "stable").strip().lower()
+    decision = decide_download_source_policy(
+        game_size_bytes=game_size_bytes,
+        is_vip=is_vip,
+        method=method,
+    )
 
-    if channel_name in {"stable", "production", "release"}:
+    if decision.prefer_hf_primary:
+        primary_pool = HF_ORIGINS
+        fallback_pool = CDN_ORIGINS
+        primary_name = "huggingface"
+    elif channel_name in {"stable", "production", "release"}:
         primary_pool = CDN_ORIGINS
         fallback_pool = HF_ORIGINS
         primary_name = "cdn"
@@ -74,5 +94,10 @@ def resolve_origin_url(
         primary = _sign(primary, expires_at)
         fallbacks = [_sign(value, expires_at) for value in fallbacks]
 
-    return OriginRoute(origin=primary_name, url=primary, fallbacks=fallbacks)
-
+    return OriginRoute(
+        origin=primary_name,
+        url=primary,
+        fallbacks=fallbacks,
+        policy_applied=decision.applied,
+        reason_codes=decision.reason_codes,
+    )

@@ -53,6 +53,10 @@ def ensure_schema() -> None:
             alters.append(f"ALTER TABLE users ADD COLUMN is_verified BOOLEAN DEFAULT {_bool_default(False)}")
         if "role" not in columns:
             alters.append("ALTER TABLE users ADD COLUMN role VARCHAR(20) DEFAULT 'user'")
+        if "membership_tier" not in columns:
+            alters.append("ALTER TABLE users ADD COLUMN membership_tier VARCHAR(40)")
+        if "membership_expires_at" not in columns:
+            alters.append(f"ALTER TABLE users ADD COLUMN membership_expires_at {timestamp_type}")
         _apply_alters(alters)
 
     if "game_graphics_configs" in tables:
@@ -226,6 +230,34 @@ def ensure_schema() -> None:
                 text(
                     "CREATE UNIQUE INDEX IF NOT EXISTS uq_p2p_peers_user_device "
                     "ON p2p_peers (user_id, device_id)"
+                )
+            )
+
+    if "support_donations" not in tables:
+        created_default = f"DEFAULT {timestamp_default}" if timestamp_default else ""
+        create_statement = f"""
+            CREATE TABLE support_donations (
+                id VARCHAR(36) PRIMARY KEY,
+                user_id VARCHAR(36) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                amount REAL DEFAULT 0,
+                currency VARCHAR(10) DEFAULT 'USD',
+                provider VARCHAR(40) DEFAULT 'donation',
+                note TEXT,
+                created_at {timestamp_type} {created_default}
+            )
+        """
+        with engine.begin() as connection:
+            connection.execute(text(create_statement))
+            connection.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_support_donations_user_id "
+                    "ON support_donations (user_id)"
+                )
+            )
+            connection.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_support_donations_created_at "
+                    "ON support_donations (created_at)"
                 )
             )
 

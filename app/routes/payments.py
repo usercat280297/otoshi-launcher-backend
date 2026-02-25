@@ -1,16 +1,29 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Request
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from ..db import get_db
-from ..models import Game, LibraryEntry, PaymentTransaction, User
-from ..schemas import PaymentIntentIn, PaymentOut
+from ..models import Game, LibraryEntry, PaymentTransaction, SupportDonation, User
+from ..schemas import DonationCreateIn, DonationOut, PaymentIntentIn, PaymentOut
 from ..services.stripe_service import stripe_service
 from ..services.vnpay import vnpay_service
 from ..core.config import VNPAY_RETURN_URL
 from .deps import get_current_user
 
 router = APIRouter()
+_DONATION_TIER_RULES: list[tuple[str, float, int]] = [
+    ("vip", 100.0, 365),
+    ("supporter_plus", 30.0, 180),
+    ("supporter", 5.0, 90),
+]
+
+
+def _resolve_tier_from_total(total_amount: float) -> tuple[str, int] | tuple[None, None]:
+    for tier, threshold, duration_days in _DONATION_TIER_RULES:
+        if total_amount >= threshold:
+            return tier, duration_days
+    return None, None
 
 
 @router.get("/history", response_model=list[PaymentOut])
@@ -61,6 +74,59 @@ def checkout_game(
     db.commit()
     db.refresh(payment)
     return payment
+
+
+@router.post("/donate", response_model=DonationOut)
+def donate(
+    payload: DonationCreateIn,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    currency = str(payload.currency or "USD").strip().upper()[:10] or "USD"
+    provider = str(payload.provider or "donation").strip()[:40] or "donation"
+    donation = SupportDonation(
+        user_id=current_user.id,
+        amount=float(payload.amount),
+        currency=currency,
+        provider=provider,
+        note=payload.note,
+        created_at=datetime.utcnow(),
+    )
+    db.add(donation)
+    db.flush()
+
+    lifetime_total = (
+        db.query(func.coalesce(func.sum(SupportDonation.amount), 0.0))
+        .filter(SupportDonation.user_id == current_user.id)
+        .scalar()
+    )
+    tier, duration_days = _resolve_tier_from_total(float(lifetime_total or 0.0))
+    tier_expires_at = None
+    if tier and duration_days:
+        now = datetime.utcnow()
+        proposed_expiry = now + timedelta(days=duration_days)
+        current_expiry = current_user.membership_expires_at
+        if current_expiry and current_expiry > proposed_expiry:
+            tier_expires_at = current_expiry
+        else:
+            tier_expires_at = proposed_expiry
+        current_user.membership_tier = tier
+        current_user.membership_expires_at = tier_expires_at
+
+    db.commit()
+    db.refresh(donation)
+    db.refresh(current_user)
+
+    return {
+        "id": donation.id,
+        "amount": float(donation.amount or 0.0),
+        "currency": donation.currency or currency,
+        "provider": donation.provider or provider,
+        "note": donation.note,
+        "created_at": donation.created_at,
+        "tier": current_user.membership_tier,
+        "tier_expires_at": current_user.membership_expires_at,
+    }
 
 
 @router.post("/stripe/create-intent")

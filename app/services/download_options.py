@@ -12,6 +12,7 @@ from ..services.chunk_manifests import (
     get_chunk_manifest_size,
     get_chunk_versions_for_game,
 )
+from ..services.download_source_policy import decide_download_source_policy
 from ..services.fixes import get_bypass_option, get_online_fix_options
 from ..services.huggingface import huggingface_fetcher
 from ..services.settings import get_download_settings
@@ -282,6 +283,16 @@ def build_download_options(app_id: str, install_root: Optional[str] = None) -> O
     chunk_versions = get_chunk_versions_for_game(app_id, name)
     chunk_size = get_chunk_manifest_size(app_id, name)
     size_bytes = chunk_size or _manifest_size_bytes(app_id) or _estimate_storage_bytes(detail)
+    policy_preview_non_vip = decide_download_source_policy(
+        game_size_bytes=size_bytes,
+        is_vip=False,
+        log_decision=False,
+    )
+    policy_preview_vip = decide_download_source_policy(
+        game_size_bytes=size_bytes,
+        is_vip=True,
+        log_decision=False,
+    )
     free_bytes, total_bytes = _disk_usage(root)
     return {
         "app_id": str(app_id),
@@ -296,6 +307,10 @@ def build_download_options(app_id: str, install_root: Optional[str] = None) -> O
         "install_path": root,
         "free_bytes": free_bytes,
         "total_bytes": total_bytes,
+        "source_policy_preview": {
+            "non_vip": policy_preview_non_vip.to_dict(),
+            "vip": policy_preview_vip.to_dict(),
+        },
     }
 
 

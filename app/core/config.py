@@ -403,6 +403,19 @@ _DEFAULT_CDN_FALLBACK = f"http://localhost:{_BACKEND_PORT},http://127.0.0.1:{_BA
 CDN_PRIMARY_URLS = os.getenv("CDN_PRIMARY_URLS", _DEFAULT_CDN_PRIMARY).split(",")
 CDN_FALLBACK_URLS = os.getenv("CDN_FALLBACK_URLS", _DEFAULT_CDN_FALLBACK).split(",")
 
+DOWNLOAD_SOURCE_POLICY_ENABLED = os.getenv("DOWNLOAD_SOURCE_POLICY_ENABLED", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+    "on",
+)
+DOWNLOAD_BIG_GAME_THRESHOLD_BYTES = int(
+    os.getenv("DOWNLOAD_BIG_GAME_THRESHOLD_BYTES", str(50 * 1024 * 1024 * 1024))
+)
+DOWNLOAD_SOURCE_POLICY_SCOPE = (
+    os.getenv("DOWNLOAD_SOURCE_POLICY_SCOPE", "vip_only").strip().lower() or "vip_only"
+)
+
 STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "")
 STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
 
