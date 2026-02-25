@@ -10,6 +10,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from ..core.config import SCREENSHOT_STORAGE_DIR
+from ..core.cache import cache_client
 from ..db import get_db
 from ..models import (
     ActivityEvent,
@@ -36,7 +37,8 @@ from ..schemas import (
     UserProfileUpdate,
     UserPublicOut,
 )
-from .deps import get_current_user
+from ..services.membership import resolve_effective_membership_tier
+from .deps import get_current_user, get_current_user_optional
 
 router = APIRouter()
 _MEMBER_ONLINE_TTL_SECONDS = 90
@@ -244,13 +246,13 @@ async def publish_community_comment(
 def list_community_members(
     limit: int = 120,
     db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
 ):
     normalized_limit = min(max(int(limit), 1), 500)
     users = (
         db.query(User)
         .filter(User.is_active.is_(True))
-        .order_by(User.created_at.asc())
-        .limit(normalized_limit)
+        .order_by(User.created_at.desc())
         .all()
     )
 
@@ -260,18 +262,34 @@ def list_community_members(
 
     members: list[dict] = []
     for user in users:
+        has_active_session = bool(cache_client.get_session(user.id))
+        is_current_user = bool(current_user and current_user.id == user.id)
+        # Only show members that are truly signed in (any auth method), plus the
+        # currently authenticated viewer for resilience across backend restarts.
+        if not has_active_session and not is_current_user:
+            continue
+
+        effective_tier = resolve_effective_membership_tier(user)
+        membership_active = bool(effective_tier)
         is_online, last_seen = _compute_member_presence(
             user=user,
             peer_last_seen=last_seen_map.get(user.id),
             cutoff=cutoff,
         )
+        if has_active_session:
+            is_online = True
+            last_seen = datetime.utcnow()
         members.append(
             {
                 "user_id": user.id,
                 "username": user.username,
                 "display_name": user.display_name,
                 "avatar_url": user.avatar_url,
-                "membership_tier": user.membership_tier,
+                "membership_tier": effective_tier,
+                "membership_expires_at": user.membership_expires_at
+                if membership_active
+                else None,
+                "membership_active": membership_active,
                 "is_online": is_online,
                 "last_seen_at": last_seen,
             }
@@ -285,7 +303,7 @@ def list_community_members(
             str(item.get("display_name") or item.get("username") or "").lower(),
         )
     )
-    return members
+    return members[:normalized_limit]
 
 
 @router.get("/leaderboard/donations", response_model=List[DonationLeaderboardEntryOut])
@@ -326,6 +344,8 @@ def donation_leaderboard(
         user = user_map.get(user_id)
         if not user:
             continue
+        effective_tier = resolve_effective_membership_tier(user)
+        membership_active = bool(effective_tier)
         is_online, last_seen = _compute_member_presence(
             user=user,
             peer_last_seen=last_seen_map.get(user_id),
@@ -338,7 +358,11 @@ def donation_leaderboard(
                 "username": user.username,
                 "display_name": user.display_name,
                 "avatar_url": user.avatar_url,
-                "membership_tier": user.membership_tier,
+                "membership_tier": effective_tier,
+                "membership_expires_at": user.membership_expires_at
+                if membership_active
+                else None,
+                "membership_active": membership_active,
                 "is_online": is_online,
                 "last_seen_at": last_seen,
                 "total_amount": float(row.total_amount or 0.0),

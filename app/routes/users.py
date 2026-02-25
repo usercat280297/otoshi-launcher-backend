@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from ..db import get_db
 from ..models import SupportDonation, User
 from ..schemas import SupportProfileOut, UserOut, UserPublicOut, UserUpdate
+from ..services.membership import resolve_effective_membership_tier
 from .deps import get_current_user
 
 router = APIRouter()
@@ -22,6 +23,7 @@ def get_my_support_profile(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    effective_tier = resolve_effective_membership_tier(current_user)
     lifetime_total = (
         db.query(func.coalesce(func.sum(SupportDonation.amount), 0.0))
         .filter(SupportDonation.user_id == current_user.id)
@@ -60,8 +62,9 @@ def get_my_support_profile(
             break
 
     return {
-        "tier": current_user.membership_tier,
+        "tier": effective_tier,
         "expires_at": current_user.membership_expires_at,
+        "is_active": bool(effective_tier),
         "lifetime_total": float(lifetime_total or 0.0),
         "period_total": float(period_total or 0.0),
         "rank": rank,

@@ -50,6 +50,15 @@ class HuggingFaceChunkFetcher:
     def enabled(self) -> bool:
         return bool(HF_REPO_ID)
 
+    def resolve_file_url(self, file_path: str) -> Optional[str]:
+        if not self.enabled():
+            return None
+        normalized = _normalize_path(file_path)
+        if not normalized:
+            return None
+        encoded = _encode_path(normalized)
+        return f"{self._base_url().rstrip('/')}/{encoded}"
+
     def _base_url(self) -> str:
         if HF_REPO_TYPE == "space":
             return f"https://huggingface.co/spaces/{HF_REPO_ID}/resolve/{HF_REVISION}"

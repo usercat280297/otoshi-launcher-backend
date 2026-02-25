@@ -1114,6 +1114,8 @@ class CommunityMemberOut(BaseModel):
     display_name: Optional[str] = None
     avatar_url: Optional[str] = None
     membership_tier: Optional[str] = None
+    membership_expires_at: Optional[datetime] = None
+    membership_active: bool = False
     is_online: bool = False
     last_seen_at: Optional[datetime] = None
 
@@ -1125,6 +1127,8 @@ class DonationLeaderboardEntryOut(BaseModel):
     display_name: Optional[str] = None
     avatar_url: Optional[str] = None
     membership_tier: Optional[str] = None
+    membership_expires_at: Optional[datetime] = None
+    membership_active: bool = False
     is_online: bool = False
     last_seen_at: Optional[datetime] = None
     total_amount: float
@@ -1134,6 +1138,7 @@ class DonationLeaderboardEntryOut(BaseModel):
 class SupportProfileOut(BaseModel):
     tier: Optional[str] = None
     expires_at: Optional[datetime] = None
+    is_active: bool = False
     lifetime_total: float = 0.0
     period_total: float = 0.0
     rank: Optional[int] = None

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from typing import Any, Optional
 import logging
 
@@ -12,10 +11,10 @@ from ..core.config import (
     DOWNLOAD_SOURCE_POLICY_SCOPE,
 )
 from .huggingface import huggingface_fetcher
+from .membership import resolve_effective_membership_tier
 
 logger = logging.getLogger("download_source_policy")
 
-_VIP_ROLES = {"vip", "admin"}
 _VALID_SCOPES = {"vip_only", "all"}
 
 
@@ -59,41 +58,11 @@ def _safe_int(value: Any) -> Optional[int]:
         return None
 
 
-def _is_membership_active(user: Any) -> bool:
-    expires_at = getattr(user, "membership_expires_at", None)
-    if not expires_at:
-        return False
-    try:
-        if isinstance(expires_at, str):
-            raw = expires_at.strip()
-            if raw.endswith("Z"):
-                raw = f"{raw[:-1]}+00:00"
-            expires_dt = datetime.fromisoformat(raw)
-        elif isinstance(expires_at, datetime):
-            expires_dt = expires_at
-        else:
-            return False
-    except ValueError:
-        return False
-
-    if expires_dt.tzinfo is None:
-        expires_dt = expires_dt.replace(tzinfo=timezone.utc)
-    return expires_dt >= datetime.now(timezone.utc)
-
-
 def is_vip_identity(user: Any) -> bool:
     if not user:
         return False
 
-    role = str(getattr(user, "role", "") or "").strip().lower()
-    if role in _VIP_ROLES:
-        return True
-
-    tier = str(getattr(user, "membership_tier", "") or "").strip().lower()
-    if tier in {"vip", "supporter_plus", "supporter"} and _is_membership_active(user):
-        return True
-
-    return False
+    return resolve_effective_membership_tier(user) in {"vip", "supporter_plus", "supporter"}
 
 
 def decide_download_source_policy(
